@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Environment
+.env
+.env.local
+
+# Build
+frontend/.next/
+frontend/out/
+dist/
+build/
+
+# Reports & charts
+/tmp/
+*.xlsx
+*.png
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
