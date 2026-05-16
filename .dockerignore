@@ -1,0 +1,30 @@
+.git
+.gitignore
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node / Next generated files
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*
+
+# Local data and logs
+*.log
+local.db
+*.sqlite
+*.sqlite3
+reports/
+charts/

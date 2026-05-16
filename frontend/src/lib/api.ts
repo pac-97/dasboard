@@ -173,4 +173,5 @@ export interface OperationsOverview {
   stats: Record<string, number>;
   recent_jobs: { id: number; type: string; status: string }[];
   email_logs: { recipient: string; status: string; subject: string }[];
+  audit_history: { action: string; actor: string; created_at: string }[];
 }

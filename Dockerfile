@@ -2,9 +2,10 @@
 FROM node:20-alpine AS frontend-build
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN npm ci
 COPY frontend/ .
 ENV NEXT_PUBLIC_API_URL=/api/v1
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # Stage 2: Python runtime with static UI + API
@@ -31,10 +32,8 @@ ENV CORS_ORIGINS=*
 
 RUN mkdir -p /data /data/reports /data/charts
 
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
 EXPOSE 8080
 VOLUME ["/data"]
 
-ENTRYPOINT ["/entrypoint.sh"]
+WORKDIR /app/backend
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

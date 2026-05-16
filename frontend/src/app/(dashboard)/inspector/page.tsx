@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AgGridReact } from "ag-grid-react";
-import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
+import { AllCommunityModule, ColDef, ModuleRegistry, ValueFormatterParams } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 import { Loader2 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SeverityChart } from "@/components/charts/severity-chart";
-import { api } from "@/lib/api";
+import { api, InspectorFinding } from "@/lib/api";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
@@ -33,7 +33,7 @@ export default function InspectorPage() {
       }),
   });
 
-  const columns = [
+  const columns: ColDef<InspectorFinding>[] = [
     { field: "account_id", headerName: "Account", filter: true, width: 140 },
     { field: "severity", headerName: "Severity", filter: true, width: 110 },
     { field: "title", headerName: "Title", flex: 2, filter: true },
@@ -43,7 +43,7 @@ export default function InspectorPage() {
       field: "fix_available",
       headerName: "Fix Available",
       width: 120,
-      valueFormatter: (p: { value: boolean }) => (p.value ? "Yes" : "No"),
+      valueFormatter: (p: ValueFormatterParams<InspectorFinding, boolean | null>) => (p.value ? "Yes" : "No"),
     },
     { field: "status", headerName: "Status", width: 100 },
   ];
