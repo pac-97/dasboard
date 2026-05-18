@@ -35,7 +35,7 @@ def _detect_benchmark(finding: dict) -> str | None:
 
 def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Fetch active Security Hub compliance findings; classify CIS / NIST in Python."""
-    client = get_client("securityhub")
+    client = get_client("securityhub", assume_role=True)
     findings: list[dict[str, Any]] = []
 
     filters: dict[str, Any] = {

@@ -8,7 +8,7 @@ logger = get_logger(__name__)
 
 def list_organization_accounts() -> list[dict]:
     """List active organization accounts, or fall back to the current account."""
-    org = get_client("organizations")
+    org = get_client("organizations", assume_role=True)
     accounts: list[dict] = []
     try:
         paginator = org.get_paginator("list_accounts")
@@ -35,7 +35,7 @@ def list_organization_accounts() -> list[dict]:
             raise
 
         logger.warning("organization_accounts_unavailable_falling_back_to_current_account", error=error_code)
-        sts = get_client("sts")
+        sts = get_client("sts", assume_role=False)
         identity = sts.get_caller_identity()
         account_id = identity["Account"]
         return [{"account_id": account_id, "account_name": account_id, "email": None}]

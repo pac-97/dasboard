@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     aws_delegated_account_id: str = ""
     aws_organization_id: str = ""
     security_hub_admin_account_id: str = ""
+    delegated_admin_role_arn: str = ""
     inspector_aggregation_region: str = "us-east-1"
 
     # S3 findings count bucket

@@ -24,7 +24,7 @@ def fetch_inspector_findings(
 ) -> list[dict[str, Any]]:
     """Fetch organization-wide Inspector v2 findings (delegated admin). Uses EC2/instance AWS credentials."""
     settings = get_settings()
-    client = get_client("inspector2", region=settings.inspector_aggregation_region)
+    client = get_client("inspector2", region=settings.inspector_aggregation_region, assume_role=True)
     findings: list[dict[str, Any]] = []
     filter_criteria: dict[str, Any] = {
         "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
