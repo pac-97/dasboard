@@ -26,9 +26,7 @@ def fetch_inspector_findings(
     settings = get_settings()
     client = get_client("inspector2", region=settings.inspector_aggregation_region, assume_role=True)
     findings: list[dict[str, Any]] = []
-    filter_criteria: dict[str, Any] = {
-        "findingStatus": [{"comparison": "EQUALS", "value": "ACTIVE"}],
-    }
+    filter_criteria: dict[str, Any] = {}
 
     if severities:
         filter_criteria["severity"] = [{"comparison": "EQUALS", "value": s} for s in severities]
