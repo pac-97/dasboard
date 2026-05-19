@@ -37,7 +37,7 @@ def fetch_inspector_findings(
     all_arns: list[str] = []
 
     while True:
-        params: dict[str, Any] = {"maxResults": 100, "filterCriteria": filter_criteria}
+        params: dict[str, Any] = {"maxResults": min(100, settings.max_inspector_results), "filterCriteria": filter_criteria}
         if next_token:
             params["nextToken"] = next_token
 
