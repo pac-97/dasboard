@@ -19,12 +19,12 @@ class Settings(BaseSettings):
     static_dir: str = "/app/static"
 
     # AWS (delegated admin account credentials on EC2 instance role or keys)
-    aws_region: str = "us-east-1"
+    aws_region: str = "ap-south-1"
     aws_delegated_account_id: str = ""
     aws_organization_id: str = ""
     security_hub_admin_account_id: str = ""
     delegated_admin_role_arn: str = ""
-    inspector_aggregation_region: str = "us-east-1"
+    inspector_aggregation_region: str = "ap-south-1"
     max_inspector_results: int = 1000
 
     # S3 findings count bucket
