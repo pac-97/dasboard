@@ -45,10 +45,8 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
 
     logger.info("live_aws_fetch_start", force=force)
     accounts = list_organization_accounts()
-    inspector_findings, cspm_findings = await asyncio.gather(
-        asyncio.to_thread(fetch_inspector_findings),
-        asyncio.to_thread(fetch_cspm_findings),
-    )
+    inspector_findings = fetch_inspector_findings()
+    cspm_findings = fetch_cspm_findings()
     inspector_by_account = _aggregate_inspector(inspector_findings)
 
     account_rows = []
