@@ -41,14 +41,33 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
     global _cache
     now = time.time()
     if not force and _cache["data"] and (now - _cache["fetched_at"]) < 120:
+        logger.info("using_cached_snapshot", age_seconds=now - _cache["fetched_at"])
         return _cache["data"]
 
     logger.info("live_aws_fetch_start", force=force)
+    
+    # Step 1: List organization accounts
+    start = time.time()
     accounts = list_organization_accounts()
+    logger.info("accounts_fetched", count=len(accounts), elapsed_seconds=time.time() - start)
+    
+    # Step 2: Fetch Inspector findings
+    start = time.time()
     inspector_findings = fetch_inspector_findings()
+    logger.info("inspector_findings_fetched", count=len(inspector_findings), elapsed_seconds=time.time() - start)
+    
+    # Step 3: Fetch CSPM findings
+    start = time.time()
     cspm_findings = fetch_cspm_findings()
+    logger.info("cspm_findings_fetched", count=len(cspm_findings), elapsed_seconds=time.time() - start)
+    
+    # Step 4: Aggregate findings
+    start = time.time()
     inspector_by_account = _aggregate_inspector(inspector_findings)
+    logger.info("inspector_aggregated", accounts_with_findings=len(inspector_by_account), elapsed_seconds=time.time() - start)
 
+    # Step 5: Build account rows
+    start = time.time()
     account_rows = []
     for acc in accounts:
         aid = acc["account_id"]
@@ -67,6 +86,7 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
                 **cspm,
             }
         )
+    logger.info("account_rows_built", count=len(account_rows), elapsed_seconds=time.time() - start)
 
     payload = {
         "fetched_at": now,
@@ -81,7 +101,7 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
         },
     }
     _cache = {"data": payload, "fetched_at": now}
-    logger.info("live_aws_fetch_done", accounts=len(account_rows), inspector=len(inspector_findings))
+    logger.info("live_aws_fetch_done", accounts=len(account_rows), inspector=len(inspector_findings), cspm=len(cspm_findings), total_time_seconds=time.time() - now)
     return payload
 
 

@@ -35,6 +35,7 @@ def _detect_benchmark(finding: dict) -> str | None:
 
 def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Fetch active Security Hub compliance findings; classify CIS / NIST in Python."""
+    logger.info("cspm_fetch_start")
     client = get_client("securityhub", assume_role=True)
     findings: list[dict[str, Any]] = []
 
@@ -46,6 +47,9 @@ def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, 
         filters["AwsAccountId"] = [{"Value": a, "Comparison": "EQUALS"} for a in account_ids]
 
     next_token = None
+    page_count = 0
+    logger.info("cspm_get_findings_start", filters=filters)
+    
     while True:
         params: dict[str, Any] = {"Filters": filters, "MaxResults": 100}
         if next_token:
@@ -57,6 +61,10 @@ def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, 
             filters.pop("WorkflowStatus", None)
             response = _get_findings_page(client, **params)
 
+        page_count += 1
+        findings_in_page = len(response.get("Findings", []))
+        logger.info("cspm_get_findings_page", page=page_count, findings_in_page=findings_in_page, total_findings=len(findings))
+
         for f in response.get("Findings", []):
             benchmark = _detect_benchmark(f)
             if not benchmark:
@@ -67,7 +75,7 @@ def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, 
         if not next_token:
             break
 
-    logger.info("cspm_findings_fetched", count=len(findings))
+    logger.info("cspm_findings_fetched", count=len(findings), pages=page_count)
     return findings
 
 

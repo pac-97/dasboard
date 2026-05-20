@@ -24,6 +24,8 @@ def fetch_inspector_findings(
 ) -> list[dict[str, Any]]:
     """Fetch organization-wide Inspector v2 findings (delegated admin). Uses EC2/instance AWS credentials."""
     settings = get_settings()
+    logger.info("inspector_fetch_start", region=settings.inspector_aggregation_region)
+    
     client = get_client("inspector2", region=settings.inspector_aggregation_region, assume_role=True)
     findings: list[dict[str, Any]] = []
     filter_criteria: dict[str, Any] = {}
@@ -35,14 +37,19 @@ def fetch_inspector_findings(
 
     next_token = None
     all_arns: list[str] = []
+    page_count = 0
 
+    logger.info("inspector_list_findings_start", filter_criteria=filter_criteria)
     while True:
-        params: dict[str, Any] = {"maxResults": min(100, settings.max_inspector_results), "filterCriteria": filter_criteria}
+        params: dict[str, Any] = {"maxResults": 100, "filterCriteria": filter_criteria}
         if next_token:
             params["nextToken"] = next_token
 
         response = _list_findings_page(client, **params)
         batch_arns = response.get("findings", [])
+        page_count += 1
+        logger.info("inspector_list_findings_page", page=page_count, arns_in_page=len(batch_arns), total_arns=len(all_arns))
+        
         if batch_arns:
             if isinstance(batch_arns[0], dict):
                 for item in batch_arns:
@@ -56,12 +63,16 @@ def fetch_inspector_findings(
         if not next_token:
             break
 
-    for i in range(0, len(all_arns), BATCH_SIZE):
-        chunk = all_arns[i : i + BATCH_SIZE]
+    logger.info("inspector_list_findings_complete", total_arns=len(all_arns), pages=page_count)
+    
+    # Fetch details for each finding in batches
+    for batch_idx in range(0, len(all_arns), BATCH_SIZE):
+        chunk = all_arns[batch_idx : batch_idx + BATCH_SIZE]
+        logger.info("inspector_batch_get_findings", batch=batch_idx // BATCH_SIZE + 1, chunk_size=len(chunk))
         detail_response = client.batch_get_findings(findingArns=chunk)
         for f in detail_response.get("findings", []):
             findings.append(_normalize_inspector_finding(f))
-
+    
     logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns))
     return findings
 
