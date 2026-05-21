@@ -122,13 +122,8 @@ def fetch_inspector_findings(
                 # Log first finding structure if available
                 if detail_response.get("findingDetails"):
                     first_finding = detail_response["findingDetails"][0]
-                    logger.info("inspector_first_finding_keys", keys=list(first_finding.keys())[:15])
-                    # Log a few key fields for debugging
-                    logger.info("inspector_first_finding_sample",
-                               finding_arn=first_finding.get("findingArn"),
-                               aws_account_id=first_finding.get("awsAccountId"),
-                               severity=first_finding.get("severity"),
-                               status=first_finding.get("status"))
+                    logger.info("inspector_first_finding_keys", keys=list(first_finding.keys()))
+                    logger.info("inspector_first_finding_full", finding=json.dumps(first_finding, default=str)[:500])
                 else:
                     logger.info("inspector_batch_0_has_no_findings", response_keys=list(detail_response.keys()))
         except ClientError as e:
@@ -172,23 +167,55 @@ def fetch_inspector_findings(
 
 def _normalize_inspector_finding(finding: dict, account_names: dict[str, str] | None = None) -> dict[str, Any]:
     account_names = account_names or {}
+    
+    # Extract account_id from ARN: arn:aws:inspector2:region:account-id:finding/id
+    finding_arn = finding.get("findingArn", "")
+    account_id = ""
+    if finding_arn:
+        parts = finding_arn.split(":")
+        if len(parts) >= 5:
+            account_id = parts[4]
+    
+    account_name = account_names.get(account_id) or account_id
+    
+    # Extract CVE IDs from cwes array
+    cves: list[str] = []
+    cwes = finding.get("cwes", [])
+    if cwes:
+        for cwe in cwes:
+            if isinstance(cwe, dict):
+                cwe_id = cwe.get("cweId")
+                if cwe_id:
+                    cves.append(str(cwe_id))
+            else:
+                cves.append(str(cwe))
+    
+    # Use epssScore for severity approximation (0-10 scale)
+    epss_score = finding.get("epssScore", 0)
+    if isinstance(epss_score, (int, float)):
+        if epss_score >= 9:
+            severity = "CRITICAL"
+        elif epss_score >= 7:
+            severity = "HIGH"
+        elif epss_score >= 4:
+            severity = "MEDIUM"
+        else:
+            severity = "LOW"
+    else:
+        severity = "INFORMATIONAL"
+    
+    # Extract resources if available
     resources = finding.get("resources", [{}])
     resource = resources[0] if resources else {}
-    cves: list[str] = []
-    if finding.get("packageVulnerabilityDetails"):
-        cves = finding["packageVulnerabilityDetails"].get("vulnerabilityIds", []) or []
     
-    account_id = finding.get("awsAccountId", "")
-    account_name = account_names.get(account_id) or account_id
-
     return {
-        "finding_arn": finding.get("findingArn", ""),
+        "finding_arn": finding_arn,
         "account_id": account_id,
         "account_name": account_name,
-        "title": finding.get("title", "Untitled Finding"),
+        "title": finding.get("title", "Inspector Finding"),
         "description": finding.get("description"),
-        "severity": finding.get("severity", "INFORMATIONAL"),
-        "status": finding.get("status", "ACTIVE"),
+        "severity": severity,
+        "status": "ACTIVE",  # Default to ACTIVE since batch_get_finding_details only returns active findings
         "resource_type": resource.get("type"),
         "resource_id": resource.get("id"),
         "region": finding.get("region"),
