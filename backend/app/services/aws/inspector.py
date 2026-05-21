@@ -117,11 +117,11 @@ def fetch_inspector_findings(
             if batch_idx == 0:
                 logger.info("inspector_batch_response_structure", 
                            response_keys=list(detail_response.keys()), 
-                           findings_count=len(detail_response.get("findings", [])),
-                           failed_arns_count=len(detail_response.get("failedArns", [])))
+                           findings_count=len(detail_response.get("findingDetails", [])),
+                           errors_count=len(detail_response.get("errors", [])))
                 # Log first finding structure if available
-                if detail_response.get("findings"):
-                    first_finding = detail_response["findings"][0]
+                if detail_response.get("findingDetails"):
+                    first_finding = detail_response["findingDetails"][0]
                     logger.info("inspector_first_finding_keys", keys=list(first_finding.keys())[:15])
                     # Log a few key fields for debugging
                     logger.info("inspector_first_finding_sample",
@@ -130,10 +130,7 @@ def fetch_inspector_findings(
                                severity=first_finding.get("severity"),
                                status=first_finding.get("status"))
                 else:
-                    # Log what alternative keys might be in the response
-                    if "Finding" in detail_response:
-                        logger.warning("inspector_response_has_Finding_singular_key")
-                    logger.info("inspector_batch_0_has_no_findings", response_keys_again=list(detail_response.keys()))
+                    logger.info("inspector_batch_0_has_no_findings", response_keys=list(detail_response.keys()))
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_msg = e.response.get("Error", {}).get("Message", "")
@@ -143,11 +140,16 @@ def fetch_inspector_findings(
             logger.error("inspector_batch_get_unexpected_error", error=str(e), type=type(e).__name__)
             continue
         
-        findings_in_batch = len(detail_response.get("findings", []))
-        failed_arns_in_batch = len(detail_response.get("failedArns", []))
-        total_failed_arns += failed_arns_in_batch
-        logger.info("inspector_batch_findings_count", batch=batch_idx // BATCH_SIZE + 1, findings_count=findings_in_batch, failed_arns=failed_arns_in_batch)
-        for f in detail_response.get("findings", []):
+        findings_in_batch = len(detail_response.get("findingDetails", []))
+        errors_in_batch = len(detail_response.get("errors", []))
+        total_failed_arns += errors_in_batch
+        logger.info("inspector_batch_findings_count", batch=batch_idx // BATCH_SIZE + 1, findings_count=findings_in_batch, errors=errors_in_batch)
+        
+        # Log errors if any
+        if errors_in_batch > 0 and batch_idx == 0:
+            logger.warning("inspector_batch_0_errors", errors=detail_response.get("errors", [])[:2])
+        
+        for f in detail_response.get("findingDetails", []):
             try:
                 # ENFORCE: Only include findings from configured region
                 finding_region = f.get("region") or settings.inspector_aggregation_region
@@ -164,7 +166,7 @@ def fetch_inspector_findings(
                 logger.error("inspector_finding_normalization_error", error=str(e), finding_arn=f.get("findingArn", "")[:80])
     
     logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns), max_enforced=len(arns_to_fetch), 
-               findings_outside_region_skipped=findings_outside_region, total_failed_arns=total_failed_arns)
+               findings_outside_region_skipped=findings_outside_region, total_errors=total_failed_arns)
     return findings
 
 
