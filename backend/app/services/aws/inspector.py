@@ -119,6 +119,13 @@ def fetch_inspector_findings(
                            response_keys=list(detail_response.keys()), 
                            findings_count=len(detail_response.get("findingDetails", [])),
                            errors_count=len(detail_response.get("errors", [])))
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_msg = e.response.get("Error", {}).get("Message", "")
+            logger.error("inspector_batch_get_failed", error_code=error_code, error_msg=error_msg, batch=batch_idx // BATCH_SIZE + 1)
+            continue
+        except Exception as e:
+            logger.error("inspector_batch_get_unexpected_error", error=str(e), type=type(e).__name__)
             continue
         
         findings_in_batch = len(detail_response.get("findingDetails", []))
