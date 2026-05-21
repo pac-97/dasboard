@@ -101,13 +101,39 @@ def fetch_inspector_findings(
 
     logger.info("inspector_list_findings_complete", total_arns=len(all_arns), pages=page_count)
     
+    # Verify ARNs are strings
+    if all_arns and not isinstance(all_arns[0], str):
+        logger.warning("inspector_arns_not_strings", first_arn_type=type(all_arns[0]).__name__, first_arn=str(all_arns[0])[:100])
+    
     # Fetch details for each finding in batches, respecting max results limit
     arns_to_fetch = all_arns[:settings.max_inspector_results]
+    total_failed_arns = 0
     for batch_idx in range(0, len(arns_to_fetch), BATCH_SIZE):
         chunk = arns_to_fetch[batch_idx : batch_idx + BATCH_SIZE]
         logger.info("inspector_batch_get_findings", batch=batch_idx // BATCH_SIZE + 1, chunk_size=len(chunk))
         try:
             detail_response = client.batch_get_finding_details(findingArns=chunk)
+            # Debug: log response structure on first batch
+            if batch_idx == 0:
+                logger.info("inspector_batch_response_structure", 
+                           response_keys=list(detail_response.keys()), 
+                           findings_count=len(detail_response.get("findings", [])),
+                           failed_arns_count=len(detail_response.get("failedArns", [])))
+                # Log first finding structure if available
+                if detail_response.get("findings"):
+                    first_finding = detail_response["findings"][0]
+                    logger.info("inspector_first_finding_keys", keys=list(first_finding.keys())[:15])
+                    # Log a few key fields for debugging
+                    logger.info("inspector_first_finding_sample",
+                               finding_arn=first_finding.get("findingArn"),
+                               aws_account_id=first_finding.get("awsAccountId"),
+                               severity=first_finding.get("severity"),
+                               status=first_finding.get("status"))
+                else:
+                    # Log what alternative keys might be in the response
+                    if "Finding" in detail_response:
+                        logger.warning("inspector_response_has_Finding_singular_key")
+                    logger.info("inspector_batch_0_has_no_findings", response_keys_again=list(detail_response.keys()))
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "Unknown")
             error_msg = e.response.get("Error", {}).get("Message", "")
@@ -116,20 +142,29 @@ def fetch_inspector_findings(
         except Exception as e:
             logger.error("inspector_batch_get_unexpected_error", error=str(e), type=type(e).__name__)
             continue
+        
+        findings_in_batch = len(detail_response.get("findings", []))
+        failed_arns_in_batch = len(detail_response.get("failedArns", []))
+        total_failed_arns += failed_arns_in_batch
+        logger.info("inspector_batch_findings_count", batch=batch_idx // BATCH_SIZE + 1, findings_count=findings_in_batch, failed_arns=failed_arns_in_batch)
         for f in detail_response.get("findings", []):
-            # ENFORCE: Only include findings from configured region
-            finding_region = f.get("region") or settings.inspector_aggregation_region
-            if finding_region != settings.inspector_aggregation_region:
-                findings_outside_region += 1
-                logger.debug("inspector_finding_outside_configured_region", 
-                           finding_region=finding_region, 
-                           configured_region=settings.inspector_aggregation_region,
-                           finding_arn=f.get("findingArn", "")[:80])
-                continue  # Skip findings from other regions
-            findings.append(_normalize_inspector_finding(f, account_names))
+            try:
+                # ENFORCE: Only include findings from configured region
+                finding_region = f.get("region") or settings.inspector_aggregation_region
+                if finding_region != settings.inspector_aggregation_region:
+                    findings_outside_region += 1
+                    logger.debug("inspector_finding_outside_configured_region", 
+                               finding_region=finding_region, 
+                               configured_region=settings.inspector_aggregation_region,
+                               finding_arn=f.get("findingArn", "")[:80])
+                    continue  # Skip findings from other regions
+                normalized = _normalize_inspector_finding(f, account_names)
+                findings.append(normalized)
+            except Exception as e:
+                logger.error("inspector_finding_normalization_error", error=str(e), finding_arn=f.get("findingArn", "")[:80])
     
     logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns), max_enforced=len(arns_to_fetch), 
-               findings_outside_region_skipped=findings_outside_region)
+               findings_outside_region_skipped=findings_outside_region, total_failed_arns=total_failed_arns)
     return findings
 
 
