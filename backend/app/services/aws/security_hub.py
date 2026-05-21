@@ -1,7 +1,8 @@
 import json
 from typing import Any
 
-from tenacity import retry, stop_after_attempt, wait_exponential
+from botocore.exceptions import ClientError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from app.core.logging import get_logger
 from app.services.aws.client import get_client
@@ -11,32 +12,70 @@ logger = get_logger(__name__)
 CIS_BENCHMARK = "cis-aws-foundations-benchmark"
 NIST_BENCHMARK = "nist-800-53"
 
+# Transient error codes that should trigger retries
+TRANSIENT_ERROR_CODES = {
+    "ThrottlingException",
+    "RequestLimitExceeded",
+    "ServiceUnavailable",
+    "InternalError",
+    "InternalServerError",
+    "TooManyRequestsException",
+}
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30))
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """Return True if error is transient and should be retried."""
+    if not isinstance(exc, ClientError):
+        return True  # Retry non-AWS errors (network issues, etc.)
+    error_code = exc.response.get("Error", {}).get("Code", "")
+    return error_code in TRANSIENT_ERROR_CODES
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30), retry=retry_if_exception(_is_retryable_error))
 def _get_findings_page(client, **kwargs) -> dict:
     return client.get_findings(**kwargs)
 
 
 def _detect_benchmark(finding: dict) -> str | None:
-    text = json.dumps(finding).lower()
-    if CIS_BENCHMARK in text or "cis aws foundations" in text:
-        return CIS_BENCHMARK
-    if NIST_BENCHMARK in text or "800-53" in text:
-        return NIST_BENCHMARK
+    """Detect benchmark from structured Compliance.Standards array (preferred) or fallback to string matching."""
     compliance = finding.get("Compliance", {}) or {}
-    for req in compliance.get("RelatedRequirements", []) or []:
-        rl = str(req).lower()
-        if CIS_BENCHMARK in rl:
+    
+    # First check structured Standards array (most reliable)
+    standards = compliance.get("Standards", []) or []
+    for standard in standards:
+        standard_name = standard.get("StandardsControlArn", "") or standard.get("Name", "")
+        standard_name_lower = str(standard_name).lower()
+        if "cis" in standard_name_lower and "aws" in standard_name_lower:
             return CIS_BENCHMARK
-        if NIST_BENCHMARK in rl or "800-53" in rl:
+        if "nist" in standard_name_lower or "800-53" in standard_name_lower:
             return NIST_BENCHMARK
+    
+    # Fallback to structured RelatedRequirements
+    for req in compliance.get("RelatedRequirements", []) or []:
+        req_lower = str(req).lower()
+        if "cis" in req_lower and "aws" in req_lower:
+            return CIS_BENCHMARK
+        if "nist" in req_lower or "800-53" in req_lower:
+            return NIST_BENCHMARK
+    
+    # Last resort: string matching in entire finding
+    text = json.dumps(finding).lower()
+    if "cis" in text and "aws" in text and "foundations" in text:
+        return CIS_BENCHMARK
+    if "nist" in text or "800-53" in text:
+        return NIST_BENCHMARK
+    
     return None
 
 
-def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, Any]]:
+def fetch_cspm_findings(account_ids: list[str] | None = None, account_names: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """Fetch active Security Hub compliance findings; classify CIS / NIST in Python."""
-    logger.info("cspm_fetch_start")
-    client = get_client("securityhub", assume_role=True)
+    from app.core.config import get_settings
+    settings = get_settings()
+    account_names = account_names or {}
+    
+    logger.info("cspm_fetch_start", region=settings.security_hub_region)
+    client = get_client("securityhub", region=settings.security_hub_region, assume_role=True)
     findings: list[dict[str, Any]] = []
 
     filters: dict[str, Any] = {
@@ -48,7 +87,7 @@ def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, 
 
     next_token = None
     page_count = 0
-    logger.info("cspm_get_findings_start", filters=filters)
+    logger.info("cspm_get_findings_start", filters=str(filters))
     
     while True:
         params: dict[str, Any] = {"Filters": filters, "MaxResults": 100}
@@ -56,10 +95,27 @@ def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, 
             params["NextToken"] = next_token
         try:
             response = _get_findings_page(client, **params)
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "Unknown")
+            error_msg = exc.response.get("Error", {}).get("Message", "")
+            logger.warning("security_hub_fetch_error", error_code=error_code, error_msg=error_msg, page=page_count, retryable=_is_retryable_error(exc))
+            # Create new filter dict instead of mutating - filters WorkflowStatus for retry
+            filters_retry = filters.copy()
+            filters_retry.pop("WorkflowStatus", None)
+            params["Filters"] = filters_retry
+            try:
+                response = _get_findings_page(client, **params)
+                logger.info("security_hub_fetch_retry_succeeded", page=page_count)
+            except ClientError as retry_exc:
+                retry_error_code = retry_exc.response.get("Error", {}).get("Code", "Unknown")
+                logger.error("security_hub_fetch_retry_failed", error_code=retry_error_code, original_error_code=error_code)
+                break  # Stop on repeated failure
+            except Exception as retry_exc:
+                logger.error("security_hub_fetch_retry_unexpected_error", error=str(retry_exc), type=type(retry_exc).__name__)
+                break
         except Exception as exc:
-            logger.warning("security_hub_fetch_error", error=str(exc))
-            filters.pop("WorkflowStatus", None)
-            response = _get_findings_page(client, **params)
+            logger.error("security_hub_fetch_unexpected_error", error=str(exc), type=type(exc).__name__, page=page_count)
+            break
 
         page_count += 1
         findings_in_page = len(response.get("Findings", []))
@@ -68,18 +124,20 @@ def fetch_cspm_findings(account_ids: list[str] | None = None) -> list[dict[str, 
         for f in response.get("Findings", []):
             benchmark = _detect_benchmark(f)
             if not benchmark:
+                logger.debug("cspm_finding_no_benchmark", finding_id=f.get("Id", "")[:50])
                 continue
-            findings.append(_normalize_security_hub_finding(f, benchmark))
+            findings.append(_normalize_security_hub_finding(f, benchmark, account_names))
 
         next_token = response.get("NextToken")
         if not next_token:
             break
 
-    logger.info("cspm_findings_fetched", count=len(findings), pages=page_count)
+    logger.info("cspm_findings_fetched", count=len(findings), pages=page_count, region=settings.security_hub_region)
     return findings
 
 
-def _normalize_security_hub_finding(finding: dict, benchmark: str) -> dict[str, Any]:
+def _normalize_security_hub_finding(finding: dict, benchmark: str, account_names: dict[str, str] | None = None) -> dict[str, Any]:
+    account_names = account_names or {}
     compliance = finding.get("Compliance", {}) or {}
     control_id = compliance.get("SecurityControlId", "")
     if not control_id and compliance.get("RelatedRequirements"):
@@ -91,9 +149,13 @@ def _normalize_security_hub_finding(finding: dict, benchmark: str) -> dict[str, 
     if isinstance(severity, dict):
         severity = severity.get("Label", "INFORMATIONAL")
 
+    account_id = finding.get("AwsAccountId", "")
+    account_name = account_names.get(account_id) or account_id
+
     return {
         "finding_id": finding.get("Id", ""),
-        "account_id": finding.get("AwsAccountId", ""),
+        "account_id": account_id,
+        "account_name": account_name,
         "benchmark": benchmark,
         "control_id": control_id,
         "title": finding.get("Title", ""),

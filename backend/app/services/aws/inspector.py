@@ -2,7 +2,8 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from tenacity import retry, stop_after_attempt, wait_exponential
+from botocore.exceptions import ClientError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -12,8 +13,26 @@ logger = get_logger(__name__)
 
 BATCH_SIZE = 10  # batch_get_finding_details max is 10 ARNs per call
 
+# Transient error codes that should trigger retries
+TRANSIENT_ERROR_CODES = {
+    "ThrottlingException",
+    "RequestLimitExceeded",
+    "ServiceUnavailable",
+    "InternalError",
+    "InternalServerError",
+    "TooManyRequestsException",
+}
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30))
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """Return True if error is transient and should be retried."""
+    if not isinstance(exc, ClientError):
+        return True  # Retry non-AWS errors (network issues, etc.)
+    error_code = exc.response.get("Error", {}).get("Code", "")
+    return error_code in TRANSIENT_ERROR_CODES
+
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30), retry=retry_if_exception(_is_retryable_error))
 def _list_findings_page(client, **kwargs) -> dict:
     return client.list_findings(**kwargs)
 
@@ -21,9 +40,11 @@ def _list_findings_page(client, **kwargs) -> dict:
 def fetch_inspector_findings(
     account_ids: list[str] | None = None,
     severities: list[str] | None = None,
+    account_names: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch organization-wide Inspector v2 findings (delegated admin). Uses EC2/instance AWS credentials."""
     settings = get_settings()
+    account_names = account_names or {}
     logger.info("inspector_fetch_start", region=settings.inspector_aggregation_region, max_results=settings.max_inspector_results)
     
     client = get_client("inspector2", region=settings.inspector_aggregation_region, assume_role=True)
@@ -38,8 +59,9 @@ def fetch_inspector_findings(
     next_token = None
     all_arns: list[str] = []
     page_count = 0
+    findings_outside_region = 0
 
-    logger.info("inspector_list_findings_start", filter_criteria=filter_criteria)
+    logger.info("inspector_list_findings_start", filter_criteria=filter_criteria, target_region=settings.inspector_aggregation_region)
     while True:
         # Stop if we've reached max results
         if len(all_arns) >= settings.max_inspector_results:
@@ -50,7 +72,16 @@ def fetch_inspector_findings(
         if next_token:
             params["nextToken"] = next_token
 
-        response = _list_findings_page(client, **params)
+        try:
+            response = _list_findings_page(client, **params)
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_msg = e.response.get("Error", {}).get("Message", "")
+            logger.error("inspector_list_findings_failed", error_code=error_code, error_msg=error_msg, page=page_count)
+            break
+        except Exception as e:
+            logger.error("inspector_list_findings_unexpected_error", error=str(e), type=type(e).__name__)
+            break
         batch_arns = response.get("findings", [])
         page_count += 1
         logger.info("inspector_list_findings_page", page=page_count, arns_in_page=len(batch_arns), total_arns=len(all_arns))
@@ -75,24 +106,48 @@ def fetch_inspector_findings(
     for batch_idx in range(0, len(arns_to_fetch), BATCH_SIZE):
         chunk = arns_to_fetch[batch_idx : batch_idx + BATCH_SIZE]
         logger.info("inspector_batch_get_findings", batch=batch_idx // BATCH_SIZE + 1, chunk_size=len(chunk))
-        detail_response = client.batch_get_finding_details(findingArns=chunk)
+        try:
+            detail_response = client.batch_get_finding_details(findingArns=chunk)
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "Unknown")
+            error_msg = e.response.get("Error", {}).get("Message", "")
+            logger.error("inspector_batch_get_failed", error_code=error_code, error_msg=error_msg, batch=batch_idx // BATCH_SIZE + 1)
+            continue
+        except Exception as e:
+            logger.error("inspector_batch_get_unexpected_error", error=str(e), type=type(e).__name__)
+            continue
         for f in detail_response.get("findings", []):
-            findings.append(_normalize_inspector_finding(f))
+            # ENFORCE: Only include findings from configured region
+            finding_region = f.get("region") or settings.inspector_aggregation_region
+            if finding_region != settings.inspector_aggregation_region:
+                findings_outside_region += 1
+                logger.debug("inspector_finding_outside_configured_region", 
+                           finding_region=finding_region, 
+                           configured_region=settings.inspector_aggregation_region,
+                           finding_arn=f.get("findingArn", "")[:80])
+                continue  # Skip findings from other regions
+            findings.append(_normalize_inspector_finding(f, account_names))
     
-    logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns), max_enforced=len(arns_to_fetch))
+    logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns), max_enforced=len(arns_to_fetch), 
+               findings_outside_region_skipped=findings_outside_region)
     return findings
 
 
-def _normalize_inspector_finding(finding: dict) -> dict[str, Any]:
+def _normalize_inspector_finding(finding: dict, account_names: dict[str, str] | None = None) -> dict[str, Any]:
+    account_names = account_names or {}
     resources = finding.get("resources", [{}])
     resource = resources[0] if resources else {}
     cves: list[str] = []
     if finding.get("packageVulnerabilityDetails"):
         cves = finding["packageVulnerabilityDetails"].get("vulnerabilityIds", []) or []
+    
+    account_id = finding.get("awsAccountId", "")
+    account_name = account_names.get(account_id) or account_id
 
     return {
         "finding_arn": finding.get("findingArn", ""),
-        "account_id": finding.get("awsAccountId", ""),
+        "account_id": account_id,
+        "account_name": account_name,
         "title": finding.get("title", "Untitled Finding"),
         "description": finding.get("description"),
         "severity": finding.get("severity", "INFORMATIONAL"),

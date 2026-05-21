@@ -4,7 +4,12 @@ import asyncio
 import time
 from typing import Any
 
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
 from app.core.logging import get_logger
+from app.db.session import AsyncSessionLocal
+from app.models.finding import CspmFinding, InspectorFinding
 from app.services.aws.inspector import fetch_inspector_findings
 from app.services.aws.organizations import list_organization_accounts
 from app.services.aws.security_hub import CIS_BENCHMARK, NIST_BENCHMARK, account_cspm_scores, fetch_cspm_findings
@@ -13,6 +18,120 @@ logger = get_logger(__name__)
 
 _cache: dict[str, Any] = {"data": None, "fetched_at": 0.0}
 _fetch_lock = asyncio.Lock()
+
+
+async def _persist_findings_to_db(inspector_findings: list[dict], cspm_findings: list[dict]) -> None:
+    """Persist findings to database asynchronously."""
+    try:
+        async with AsyncSessionLocal() as session:
+            # Delete old findings to maintain fresh data
+            await session.execute(delete(InspectorFinding))
+            await session.execute(delete(CspmFinding))
+            
+            # Persist Inspector findings
+            for finding in inspector_findings:
+                db_finding = InspectorFinding(
+                    finding_arn=finding.get("finding_arn", ""),
+                    account_id=finding.get("account_id", ""),
+                    account_name=finding.get("account_name"),
+                    title=finding.get("title", ""),
+                    description=finding.get("description"),
+                    severity=finding.get("severity", "INFORMATIONAL"),
+                    status=finding.get("status", "ACTIVE"),
+                    resource_type=finding.get("resource_type"),
+                    resource_id=finding.get("resource_id"),
+                    region=finding.get("region"),
+                    cve_ids=finding.get("cve_ids"),
+                    fix_available=finding.get("fix_available"),
+                    first_observed_at=finding.get("first_observed_at"),
+                    last_observed_at=finding.get("last_observed_at"),
+                    updated_at_source=finding.get("updated_at_source"),
+                    remediation=finding.get("remediation"),
+                    raw_payload=finding.get("raw_payload"),
+                )
+                session.add(db_finding)
+            
+            # Persist CSPM findings
+            for finding in cspm_findings:
+                db_finding = CspmFinding(
+                    finding_id=finding.get("finding_id", ""),
+                    account_id=finding.get("account_id", ""),
+                    account_name=finding.get("account_name"),
+                    benchmark=finding.get("benchmark", ""),
+                    control_id=finding.get("control_id", ""),
+                    title=finding.get("title", ""),
+                    description=finding.get("description"),
+                    compliance_status=finding.get("compliance_status", "FAILED"),
+                    severity=finding.get("severity", "INFORMATIONAL"),
+                    resource_type=finding.get("resource_type"),
+                    resource_id=finding.get("resource_id"),
+                    region=finding.get("region"),
+                    workflow_status=finding.get("workflow_status"),
+                    remediation_url=finding.get("remediation_url"),
+                )
+                session.add(db_finding)
+            
+            await session.commit()
+            logger.info("findings_persisted_to_db", inspector_count=len(inspector_findings), cspm_count=len(cspm_findings))
+    except Exception as e:
+        logger.error("db_persistence_error", error=str(e), exc_type=type(e).__name__)
+
+
+async def _load_findings_from_db() -> tuple[list[dict], list[dict]]:
+    """Load findings from database for cold-start or cache failure recovery."""
+    try:
+        async with AsyncSessionLocal() as session:
+            inspector_rows = await session.execute(select(InspectorFinding))
+            cspm_rows = await session.execute(select(CspmFinding))
+            
+            inspector_findings = [
+                {
+                    "finding_arn": f.finding_arn,
+                    "account_id": f.account_id,
+                    "account_name": f.account_name,
+                    "title": f.title,
+                    "description": f.description,
+                    "severity": f.severity,
+                    "status": f.status,
+                    "resource_type": f.resource_type,
+                    "resource_id": f.resource_id,
+                    "region": f.region,
+                    "cve_ids": f.cve_ids,
+                    "fix_available": f.fix_available,
+                    "first_observed_at": f.first_observed_at,
+                    "last_observed_at": f.last_observed_at,
+                    "updated_at_source": f.updated_at_source,
+                    "remediation": f.remediation,
+                    "raw_payload": f.raw_payload,
+                }
+                for f in inspector_rows.scalars()
+            ]
+            
+            cspm_findings = [
+                {
+                    "finding_id": f.finding_id,
+                    "account_id": f.account_id,
+                    "account_name": f.account_name,
+                    "benchmark": f.benchmark,
+                    "control_id": f.control_id,
+                    "title": f.title,
+                    "description": f.description,
+                    "compliance_status": f.compliance_status,
+                    "severity": f.severity,
+                    "resource_type": f.resource_type,
+                    "resource_id": f.resource_id,
+                    "region": f.region,
+                    "workflow_status": f.workflow_status,
+                    "remediation_url": f.remediation_url,
+                }
+                for f in cspm_rows.scalars()
+            ]
+            
+            logger.info("findings_loaded_from_db", inspector_count=len(inspector_findings), cspm_count=len(cspm_findings))
+            return inspector_findings, cspm_findings
+    except Exception as e:
+        logger.error("db_load_error", error=str(e), exc_type=type(e).__name__)
+        return [], []
 
 
 def _aggregate_inspector(findings: list[dict]) -> dict[str, dict]:
@@ -37,10 +156,11 @@ def _aggregate_inspector(findings: list[dict]) -> dict[str, dict]:
 
 
 def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
-    """Synchronous full org snapshot (run in thread pool)."""
+    """Synchronous full org snapshot (run in thread pool). Persists to database for durability."""
     global _cache
     now = time.time()
-    if not force and _cache["data"] and (now - _cache["fetched_at"]) < 120:
+    # Use longer TTL (3600s) since we now have database backup
+    if not force and _cache["data"] and (now - _cache["fetched_at"]) < 3600:
         logger.info("using_cached_snapshot", age_seconds=now - _cache["fetched_at"])
         return _cache["data"]
 
@@ -51,14 +171,17 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
     accounts = list_organization_accounts()
     logger.info("accounts_fetched", count=len(accounts), elapsed_seconds=time.time() - start)
     
+    # Create account name lookup for enrichment
+    account_names = {a["account_id"]: a.get("account_name") for a in accounts}
+    
     # Step 2: Fetch Inspector findings
     start = time.time()
-    inspector_findings = fetch_inspector_findings()
+    inspector_findings = fetch_inspector_findings(account_names=account_names)
     logger.info("inspector_findings_fetched", count=len(inspector_findings), elapsed_seconds=time.time() - start)
     
     # Step 3: Fetch CSPM findings
     start = time.time()
-    cspm_findings = fetch_cspm_findings()
+    cspm_findings = fetch_cspm_findings(account_names=account_names)
     logger.info("cspm_findings_fetched", count=len(cspm_findings), elapsed_seconds=time.time() - start)
     
     # Step 4: Aggregate findings
@@ -101,12 +224,19 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
         },
     }
     _cache = {"data": payload, "fetched_at": now}
+    
+    # Persist findings to database for durability (non-blocking, failures logged)
+    try:
+        asyncio.run(_persist_findings_to_db(inspector_findings, cspm_findings))
+    except Exception as e:
+        logger.warning("db_persistence_skipped", error=str(e))
+    
     logger.info("live_aws_fetch_done", accounts=len(account_rows), inspector=len(inspector_findings), cspm=len(cspm_findings), total_time_seconds=time.time() - now)
     return payload
 
 
 async def get_live_snapshot(force: bool = False) -> dict[str, Any]:
-    """Get live snapshot - returns cached data immediately, refreshes in background."""
+    """Get live snapshot - returns cached data immediately, refreshes in background, falls back to database."""
     global _cache
     now = time.time()
     
@@ -128,18 +258,50 @@ async def get_live_snapshot(force: bool = False) -> dict[str, Any]:
             return result
         except asyncio.TimeoutError:
             logger.error("live_snapshot_fetch_timeout_2min")
-            # Return cached data if available, even if stale
+            # Try cached data first, then database
             if _cache["data"]:
                 logger.info("returning_stale_cache_after_timeout")
                 return _cache["data"]
-            # Return empty structure if no cache
+            # Try loading from database
+            inspector_findings, cspm_findings = await _load_findings_from_db()
+            if inspector_findings or cspm_findings:
+                logger.info("returning_data_from_database_after_timeout")
+                return {
+                    "fetched_at": now,
+                    "account_count": 0,
+                    "accounts": [],
+                    "inspector_findings": inspector_findings,
+                    "cspm_findings": cspm_findings,
+                    "org_totals": {
+                        "inspector_total": len(inspector_findings),
+                        "cspm_total": len(cspm_findings),
+                        "accounts": 0,
+                    },
+                }
+            # Return empty structure if no data available
             return _empty_snapshot()
         except Exception as e:
             logger.error("live_snapshot_fetch_error", error=str(e), exc_type=type(e).__name__)
-            # Return cached data if available
+            # Try cached data first
             if _cache["data"]:
                 logger.info("returning_cached_data_after_error")
                 return _cache["data"]
+            # Try loading from database
+            inspector_findings, cspm_findings = await _load_findings_from_db()
+            if inspector_findings or cspm_findings:
+                logger.info("returning_data_from_database_after_error")
+                return {
+                    "fetched_at": now,
+                    "account_count": 0,
+                    "accounts": [],
+                    "inspector_findings": inspector_findings,
+                    "cspm_findings": cspm_findings,
+                    "org_totals": {
+                        "inspector_total": len(inspector_findings),
+                        "cspm_total": len(cspm_findings),
+                        "accounts": 0,
+                    },
+                }
             return _empty_snapshot()
 
 

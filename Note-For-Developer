@@ -1,0 +1,420 @@
+Build an enterprise-grade AWS Security Dashboard platform using:
+
+Frontend:
+- React for the complete UI/dashboard experience.
+
+Backend:
+- Python for AWS integrations, findings processing, report generation, scheduling, email orchestration, and automation workflows.
+
+Goal:
+Create a premium, visually stunning, executive-level AWS Security Dashboard for centralized organization-wide security posture management.
+
+Environment Context:
+- AWS Security services are enabled organization-wide through a delegated administrator account.
+- There are 82 AWS accounts under the AWS Organization.
+- AWS Inspector and CSPM are enabled organization-wide.
+- Delegated access and IAM functionality are already configured and working.
+- The application will run on an EC2 instance outside the delegated account.
+- The platform must later support Docker deployment.
+- Do not redesign delegated account permissions.
+
+Core Requirement:
+The system must centrally collect findings from the delegated account, process findings for all AWS accounts, generate professional reports, and automatically distribute findings to account owners.
+
+Architecture Requirements
+
+Frontend Responsibilities (React)
+The frontend must focus entirely on rich user experience and visualization.
+
+Build a premium enterprise-grade UI with:
+
+1. Executive Dashboard
+- Security posture overview
+- Organization-wide risk visibility
+- Interactive account-level visibility
+- Compliance scorecards
+- Risk analytics
+- Security trends
+
+2. Premium UX
+The application must feel like a real enterprise security product.
+
+Design expectations:
+- Beautiful modern UI
+- Premium dashboard aesthetics
+- Security-focused visual design
+- Executive-friendly presentation
+- Dark and light mode
+- Smooth interactions
+- Responsive design
+- Elegant spacing and typography
+- Rich animations
+- Professional card layouts
+
+The experience should feel comparable to:
+- AWS Console
+- Datadog
+- CrowdStrike
+- Splunk
+- Security Hub
+- Enterprise SOC dashboards
+
+Avoid:
+- Basic admin panel appearance
+- Generic templates
+- Plain tables everywhere
+- Cluttered interfaces
+- Low-quality internal tool styling
+
+3. Advanced Dashboard Screens
+Build:
+
+A. Executive Overview
+Widgets:
+- Total findings
+- Critical findings
+- High findings
+- Compliance score
+- CIS score
+- NIST score
+- Vulnerability trend
+- Security posture trend
+- Top risky accounts
+- Rising risk accounts
+- Most vulnerable services
+- Resource exposure
+
+B. Inspector Findings Dashboard
+Capabilities:
+- Global findings view
+- Account-level filtering
+- Severity filtering
+- Resource filtering
+- Region filtering
+- Timeline filtering
+- Vulnerability aging
+- Fix availability tracking
+- CVE visibility
+- Trending analysis
+
+C. CSPM Dashboard
+Support:
+- CIS AWS Foundations Benchmark v5.0.0
+- NIST Special Publication 800-53 Revision 5
+
+Views:
+- Compliance percentage
+- Passed vs failed controls
+- Benchmark comparison
+- Failed controls
+- Top failed services
+- Risk distribution
+- Account-wise comparison
+- Historical compliance movement
+
+D. Owner Dashboard
+Capabilities:
+- Owner-level visibility
+- Accounts owned
+- Findings summary
+- Email history
+- Report history
+
+E. Operations Dashboard
+Include:
+- Job execution history
+- Failed jobs
+- Retry jobs
+- Email logs
+- Processing statistics
+- Findings ingestion status
+- Schedule visibility
+- Report generation tracking
+- Audit history
+
+Visualization Requirements
+Use rich visualizations for:
+- Risk heatmaps
+- Executive scorecards
+- Severity distribution
+- Trend graphs
+- Benchmark comparison
+- Vulnerability aging
+- Region distribution
+- Historical posture
+- Risk movement
+- Findings trend
+- Service exposure
+- Security score progression
+
+Backend Responsibilities (Python)
+
+Python backend must handle all business logic and AWS operations.
+
+1. AWS Findings Collection
+Fetch organization-wide findings from delegated account.
+
+A. AWS Inspector
+Fetch:
+- Findings per account
+- Severity
+- Resource type
+- Region
+- Status
+- CVEs
+- Vulnerability details
+- Fix availability
+- Aging
+- Asset information
+
+B. CSPM Findings
+Fetch Security Hub findings for:
+- CIS AWS Foundations Benchmark v5.0.0
+- NIST Special Publication 800-53 Revision 5
+
+Collect:
+- Passed controls
+- Failed controls
+- Compliance percentage
+- Benchmark details
+- Service-level failures
+- Risk posture
+
+2. S3 Findings Count Processing
+A bucket contains findings count data.
+
+Requirements:
+- Read historical findings count data.
+- Process trends.
+- Generate visually attractive graphs.
+- Create chart exports for email attachments.
+- Build trend comparison.
+- Historical posture movement.
+
+3. Owner Consolidation Logic
+Important:
+One owner may own multiple AWS accounts.
+
+Requirements:
+- Consolidate emails.
+- Send only one email per owner.
+- Include all owned accounts in one mail.
+- Avoid duplicate communication.
+- Support editable owner mapping.
+- Support bulk owner imports.
+- Handle missing owners gracefully.
+
+4. XLSX Report Generation
+Generate professional XLSX reports.
+
+Inspector Report:
+- Executive summary
+- Severity breakdown
+- Critical findings
+- High findings
+- Vulnerability details
+- Asset visibility
+- Aging analysis
+- Region breakdown
+- Remediation tracking
+- Charts and summaries
+
+CSPM Report:
+- CIS findings
+- NIST findings
+- Failed controls
+- Passed controls
+- Compliance score
+- Benchmark comparison
+- Service-wise failures
+- Risk insights
+- Remediation guidance
+
+Formatting:
+- Executive-ready
+- Professionally styled
+- Auto filters
+- Conditional formatting
+- Embedded charts
+- Summary sheets
+- Easy readability
+
+5. Email Workflow
+Mail service uses Azure AD identity.
+
+Requirements:
+- Beautiful HTML emails.
+- Executive summary at top.
+- Security scorecards.
+- Account-wise breakdown.
+- Embedded visual charts.
+- Risk summary.
+- Compliance summary.
+
+Attachments:
+- Inspector XLSX
+- CSPM XLSX
+- Trend graph exports from S3 findings data
+
+Features:
+- Retry mechanism
+- Delivery logs
+- Email preview
+- Test email
+- Scheduled execution
+- Manual trigger
+- Failed delivery retry
+
+6. Scheduling & Automation
+Support:
+- Daily
+- Weekly
+- Monthly
+- Custom schedules
+- Manual run
+
+Execution flow:
+1. Fetch findings
+2. Normalize data
+3. Process analytics
+4. Generate reports
+5. Build charts
+6. Consolidate owners
+7. Prepare emails
+8. Send mails
+9. Store logs
+10. Update dashboard
+
+Engineering Expectations
+Build with enterprise engineering quality.
+
+Requirements:
+- Modular architecture
+- Clean separation of frontend and backend
+- Production-ready structure
+- Secure handling of secrets
+- Strong logging
+- Observability
+- Retry handling
+- Failure isolation
+- High maintainability
+- Scalable for large findings volume
+- Optimized for org-wide AWS security processing
+- Docker-ready deployment
+
+Important Design Rule:
+React frontend must focus only on premium UI and visualization.
+Python backend must handle all AWS security processing, reporting, scheduling, and email orchestration.
+
+The final result should feel like a premium enterprise SOC/security platform used by leadership and security operations teams.
+
+Use a premium enterprise-grade modern technology stack and UI quality for this platform.
+
+Technology Stack Requirements
+
+Frontend (Rich Enterprise UI)
+Use:
+- React
+- Next.js
+- Tailwind CSS
+- shadcn/ui
+- Framer Motion
+- Recharts
+- Apache ECharts
+- TanStack Query
+- AG Grid
+
+The frontend must be built for a premium, high-end, enterprise dashboard experience.
+
+Backend (Security Processing)
+Use:
+- Python
+- FastAPI
+
+Backend responsibilities:
+- AWS integrations
+- AWS Inspector findings processing
+- CSPM findings processing
+- Security Hub integrations
+- CIS AWS Foundations Benchmark v5.0.0 processing
+- NIST Special Publication 800-53 Revision 5 processing
+- S3 findings trend processing
+- XLSX generation
+- Azure AD mail integration
+- Scheduling
+- Background jobs
+- Analytics processing
+- Report generation
+
+Database & Performance Layer
+Use:
+- PostgreSQL
+- Redis
+
+Authentication & Mail
+Use:
+- Azure AD / Microsoft Identity
+- Microsoft Graph API for email workflows
+
+Deployment & Runtime
+Use:
+- Docker
+- Nginx reverse proxy
+- Environment-based configuration
+- Production-ready containerized deployment
+
+UI/UX Quality Expectations
+
+The UI must feel like a premium commercial enterprise security platform.
+
+Design inspiration level should be comparable to:
+
+- Datadog
+- CrowdStrike
+- Splunk
+- Grafana
+- AWS Console experiences
+
+The application must NOT feel like:
+- a basic admin panel
+- an internal reporting portal
+- a Bootstrap dashboard
+- a generic template website
+
+The UI must feel:
+- premium
+- expensive
+- modern
+- enterprise-grade
+- polished
+- highly interactive
+- executive-ready
+- security-focused
+
+Rich UI Expectations
+Include:
+- Premium dashboard layouts
+- Executive summary landing pages
+- Interactive drill-down experiences
+- Beautiful animated charts
+- Security heatmaps
+- Findings timelines
+- Risk scorecards
+- Compliance visualizations
+- Vulnerability trend graphs
+- Rich filtering experience
+- Smooth transitions and animations
+- Elegant hover effects
+- Modern spacing and typography
+- Responsive layouts
+- Dark mode and light mode
+- Enterprise side navigation
+- Premium loading states
+- Interactive widgets
+- Multi-level dashboards
+
+Visual Quality Standard
+The final product should look like a commercial enterprise security/SOC platform that leadership teams would assume is a paid premium product.
+
+Target experience:
+“Datadog + CrowdStrike + Splunk + Grafana + AWS Console quality combined into a modern AWS Security platform.”

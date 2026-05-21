@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     security_hub_admin_account_id: str = ""
     delegated_admin_role_arn: str = ""
     inspector_aggregation_region: str = "ap-south-1"
+    security_hub_region: str = "ap-south-1"
     max_inspector_results: int = 1000
 
     # S3 findings count bucket
