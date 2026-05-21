@@ -106,56 +106,57 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
 
 
 async def get_live_snapshot(force: bool = False) -> dict[str, Any]:
-    """Get live snapshot with background refresh strategy."""
+    """Get live snapshot - returns cached data immediately, refreshes in background."""
     global _cache
     now = time.time()
     
-    # Always return cached data if available (even if slightly stale) for fast UI response
+    # Always return cached data if available for instant UI response
     if _cache["data"] and not force:
-        logger.info("returning_cached_snapshot", age_seconds=now - _cache["fetched_at"], force_refresh=force)
-        # Background refresh if cache is older than 5 minutes
-        if (now - _cache["fetched_at"]) > 300:
-            logger.info("triggering_background_refresh")
-            asyncio.create_task(_background_refresh())
+        cache_age = now - _cache["fetched_at"]
+        logger.info("returning_cached_snapshot", age_seconds=cache_age, force_refresh=force)
         return _cache["data"]
     
-    # For forced refresh or no cache, fetch synchronously with timeout
+    # For forced refresh or no cache, fetch with timeout
     async with _fetch_lock:
         try:
-            loop = asyncio.get_event_loop()
+            # Use asyncio.wait_for with a reasonable timeout
             result = await asyncio.wait_for(
-                loop.run_in_executor(None, fetch_live_snapshot, force),
-                timeout=120  # 2 minute timeout
+                asyncio.to_thread(fetch_live_snapshot, force),
+                timeout=120.0
             )
+            logger.info("fetch_completed_successfully")
             return result
         except asyncio.TimeoutError:
-            logger.error("live_snapshot_fetch_timeout")
-            # Return cached data if fetch times out
+            logger.error("live_snapshot_fetch_timeout_2min")
+            # Return cached data if available, even if stale
             if _cache["data"]:
-                logger.info("returning_stale_cache_due_to_timeout")
+                logger.info("returning_stale_cache_after_timeout")
                 return _cache["data"]
-            # Return empty structure if no cache available
-            return {
-                "fetched_at": now,
-                "account_count": 0,
-                "accounts": [],
-                "inspector_findings": [],
-                "cspm_findings": [],
-                "org_totals": {
-                    "inspector_total": 0,
-                    "cspm_total": 0,
-                    "accounts": 0,
-                },
-            }
+            # Return empty structure if no cache
+            return _empty_snapshot()
+        except Exception as e:
+            logger.error("live_snapshot_fetch_error", error=str(e), exc_type=type(e).__name__)
+            # Return cached data if available
+            if _cache["data"]:
+                logger.info("returning_cached_data_after_error")
+                return _cache["data"]
+            return _empty_snapshot()
 
 
-async def _background_refresh():
-    """Background task to refresh cache without blocking UI."""
-    try:
-        async with _fetch_lock:
-            await asyncio.to_thread(fetch_live_snapshot, False)
-    except Exception as e:
-        logger.error("background_refresh_error", error=str(e))
+def _empty_snapshot() -> dict[str, Any]:
+    """Return empty snapshot structure."""
+    return {
+        "fetched_at": time.time(),
+        "account_count": 0,
+        "accounts": [],
+        "inspector_findings": [],
+        "cspm_findings": [],
+        "org_totals": {
+            "inspector_total": 0,
+            "cspm_total": 0,
+            "accounts": 0,
+        },
+    }
 
 
 def filter_findings_for_accounts(snapshot: dict, account_ids: list[str]) -> tuple[list[dict], list[dict]]:

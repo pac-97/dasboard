@@ -75,7 +75,7 @@ def fetch_inspector_findings(
     for batch_idx in range(0, len(arns_to_fetch), BATCH_SIZE):
         chunk = arns_to_fetch[batch_idx : batch_idx + BATCH_SIZE]
         logger.info("inspector_batch_get_findings", batch=batch_idx // BATCH_SIZE + 1, chunk_size=len(chunk))
-        detail_response = client.batch_get_findings(findingArns=chunk)
+        detail_response = client.batch_get_finding_details(findingArns=chunk)
         for f in detail_response.get("findings", []):
             findings.append(_normalize_inspector_finding(f))
     
