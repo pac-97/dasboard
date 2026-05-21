@@ -10,7 +10,7 @@ from app.services.aws.client import get_client
 
 logger = get_logger(__name__)
 
-BATCH_SIZE = 100
+BATCH_SIZE = 10  # batch_get_finding_details max is 10 ARNs per call
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=30))
