@@ -106,8 +106,56 @@ def fetch_live_snapshot(force: bool = False) -> dict[str, Any]:
 
 
 async def get_live_snapshot(force: bool = False) -> dict[str, Any]:
+    """Get live snapshot with background refresh strategy."""
+    global _cache
+    now = time.time()
+    
+    # Always return cached data if available (even if slightly stale) for fast UI response
+    if _cache["data"] and not force:
+        logger.info("returning_cached_snapshot", age_seconds=now - _cache["fetched_at"], force_refresh=force)
+        # Background refresh if cache is older than 5 minutes
+        if (now - _cache["fetched_at"]) > 300:
+            logger.info("triggering_background_refresh")
+            asyncio.create_task(_background_refresh())
+        return _cache["data"]
+    
+    # For forced refresh or no cache, fetch synchronously with timeout
     async with _fetch_lock:
-        return await asyncio.to_thread(fetch_live_snapshot, force)
+        try:
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, fetch_live_snapshot, force),
+                timeout=120  # 2 minute timeout
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.error("live_snapshot_fetch_timeout")
+            # Return cached data if fetch times out
+            if _cache["data"]:
+                logger.info("returning_stale_cache_due_to_timeout")
+                return _cache["data"]
+            # Return empty structure if no cache available
+            return {
+                "fetched_at": now,
+                "account_count": 0,
+                "accounts": [],
+                "inspector_findings": [],
+                "cspm_findings": [],
+                "org_totals": {
+                    "inspector_total": 0,
+                    "cspm_total": 0,
+                    "accounts": 0,
+                },
+            }
+
+
+async def _background_refresh():
+    """Background task to refresh cache without blocking UI."""
+    try:
+        async with _fetch_lock:
+            await asyncio.to_thread(fetch_live_snapshot, False)
+    except Exception as e:
+        logger.error("background_refresh_error", error=str(e))
 
 
 def filter_findings_for_accounts(snapshot: dict, account_ids: list[str]) -> tuple[list[dict], list[dict]]:

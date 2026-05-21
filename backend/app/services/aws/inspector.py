@@ -24,7 +24,7 @@ def fetch_inspector_findings(
 ) -> list[dict[str, Any]]:
     """Fetch organization-wide Inspector v2 findings (delegated admin). Uses EC2/instance AWS credentials."""
     settings = get_settings()
-    logger.info("inspector_fetch_start", region=settings.inspector_aggregation_region)
+    logger.info("inspector_fetch_start", region=settings.inspector_aggregation_region, max_results=settings.max_inspector_results)
     
     client = get_client("inspector2", region=settings.inspector_aggregation_region, assume_role=True)
     findings: list[dict[str, Any]] = []
@@ -41,6 +41,11 @@ def fetch_inspector_findings(
 
     logger.info("inspector_list_findings_start", filter_criteria=filter_criteria)
     while True:
+        # Stop if we've reached max results
+        if len(all_arns) >= settings.max_inspector_results:
+            logger.info("inspector_max_results_reached", current_arns=len(all_arns), max_results=settings.max_inspector_results)
+            break
+            
         params: dict[str, Any] = {"maxResults": 100, "filterCriteria": filter_criteria}
         if next_token:
             params["nextToken"] = next_token
@@ -65,15 +70,16 @@ def fetch_inspector_findings(
 
     logger.info("inspector_list_findings_complete", total_arns=len(all_arns), pages=page_count)
     
-    # Fetch details for each finding in batches
-    for batch_idx in range(0, len(all_arns), BATCH_SIZE):
-        chunk = all_arns[batch_idx : batch_idx + BATCH_SIZE]
+    # Fetch details for each finding in batches, respecting max results limit
+    arns_to_fetch = all_arns[:settings.max_inspector_results]
+    for batch_idx in range(0, len(arns_to_fetch), BATCH_SIZE):
+        chunk = arns_to_fetch[batch_idx : batch_idx + BATCH_SIZE]
         logger.info("inspector_batch_get_findings", batch=batch_idx // BATCH_SIZE + 1, chunk_size=len(chunk))
         detail_response = client.batch_get_findings(findingArns=chunk)
         for f in detail_response.get("findings", []):
             findings.append(_normalize_inspector_finding(f))
     
-    logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns))
+    logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns), max_enforced=len(arns_to_fetch))
     return findings
 
 
