@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.models.email import EmailDeliveryLog
 from app.models.owner import AccountOwner, OwnerMapping
-from app.services.aws.live_data import filter_findings_for_accounts, get_account_row, get_live_snapshot
+from app.services.aws.live_data import get_account_by_id, get_live_snapshot, fetch_account_inspector_findings, fetch_account_cspm_findings
 from app.services.charts.account_chart import generate_multi_account_chart
 from app.services.email.graph_client import GraphMailClient
 from app.services.reports.combined_report import generate_combined_account_report
@@ -76,7 +76,7 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
         raise HTTPException(400, "Select at least one account")
 
     snapshot = await get_live_snapshot(force=False)
-    account_rows = [get_account_row(snapshot, aid) for aid in payload.account_ids]
+    account_rows = [get_account_by_id(snapshot.get("accounts", []), aid) for aid in payload.account_ids]
     account_rows = [r for r in account_rows if r]
 
     names = [r.get("account_name", r.get("account_id")) for r in account_rows]
@@ -100,9 +100,21 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
         raise HTTPException(400, "At least one recipient required")
 
     snapshot = await get_live_snapshot(force=True)
-    inspector, cspm = filter_findings_for_accounts(snapshot, payload.account_ids)
-    account_rows = [get_account_row(snapshot, aid) for aid in payload.account_ids]
+    account_rows = [get_account_by_id(snapshot.get("accounts", []), aid) for aid in payload.account_ids]
     account_rows = [r for r in account_rows if r]
+
+    # Fetch findings for each account (on-demand)
+    inspector = []
+    cspm = []
+    for account_id in payload.account_ids:
+        account = next((a for a in account_rows if a and a.get("account_id") == account_id), None)
+        if account:
+            inspector_result = await fetch_account_inspector_findings(account_id, account.get("account_name"))
+            cspm_result = await fetch_account_cspm_findings(account_id, account.get("account_name"))
+            if inspector_result.get("status") == "completed":
+                inspector.extend(inspector_result.get("findings", []))
+            if cspm_result.get("status") == "completed":
+                cspm.extend(cspm_result.get("findings", []))
 
     xlsx_path = generate_combined_account_report(
         payload.account_ids, inspector, cspm, snapshot

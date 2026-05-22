@@ -5,7 +5,7 @@ import xlsxwriter
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.services.aws.live_data import get_account_row
+from app.services.aws.live_data import get_account_by_id
 
 logger = get_logger(__name__)
 
@@ -50,7 +50,7 @@ def _summary_sheet(workbook, account_ids, inspector_findings, cspm_findings, sna
 
     row = 1
     for aid in account_ids:
-        acc = get_account_row(snapshot, aid) or {}
+        acc = get_account_by_id(snapshot.get("accounts", []), aid) or {}
         ws.write(row, 0, acc.get("account_name", aid))
         ws.write(row, 1, acc.get("inspector_total", 0))
         ws.write(row, 2, acc.get("inspector_critical", 0))
