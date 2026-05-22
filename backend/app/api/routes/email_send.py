@@ -151,6 +151,7 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             )
             
             account_findings = {}
+            all_findings = []
             for account_id, result in zip(payload.account_ids, inspector_results):
                 if isinstance(result, Exception):
                     continue
@@ -163,30 +164,48 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                         "total": stats.get("total", 0),
                         "coverage": stats.get("coverage", 0),
                     }
+                    # Collect all findings for detailed report
+                    all_findings.extend(result.get("findings", []))
             
             if not account_findings:
                 raise Exception("No findings retrieved from Inspector")
             
-            # Generate Inspector report (XLSX only)
-            attachment_path = generate_inspector_report(account_findings)
+            # Generate Inspector report with detailed findings
+            attachment_path = generate_inspector_report(account_findings, findings_data=all_findings)
         
         else:  # CSPM
-            # Fetch CSPM scores from S3 (no AWS API calls needed - faster)
-            cspm_scores = get_cspm_scores_from_s3()
-            account_scores = {aid: cspm_scores.get(aid, {
-                "cis_score": 0, "nist_score": 0, "cis_pass": 0, "cis_fail": 0, "nist_pass": 0, "nist_fail": 0
-            }) for aid in payload.account_ids}
+            # Fetch CSPM findings for detailed report
+            cspm_results = await asyncio.gather(
+                *[fetch_account_cspm_findings(aid, r.get("account_name")) 
+                  for aid, r in zip(payload.account_ids, account_rows)],
+                return_exceptions=True
+            )
             
-            # Enrich with account names
-            for aid in payload.account_ids:
-                account = next((r for r in account_rows if r.get("account_id") == aid), {})
-                account_scores[aid]["account_name"] = account.get("account_name", aid)
+            account_scores = {}
+            all_findings = []
+            for account_id, result in zip(payload.account_ids, cspm_results):
+                if isinstance(result, Exception):
+                    continue
+                if result.get("status") == "completed":
+                    findings = result.get("findings", [])
+                    stats = result.get("stats", {})
+                    account_scores[account_id] = {
+                        "account_name": result.get("account_name", account_id),
+                        "cis_score": stats.get("cis_score", 0),
+                        "nist_score": stats.get("nist_score", 0),
+                        "cis_pass": sum(1 for f in findings if f.get("benchmark") == "cis-aws-foundations-benchmark" and f.get("compliance_status") == "PASSED"),
+                        "cis_fail": sum(1 for f in findings if f.get("benchmark") == "cis-aws-foundations-benchmark" and f.get("compliance_status") != "PASSED"),
+                        "nist_pass": sum(1 for f in findings if f.get("benchmark") == "nist-800-53" and f.get("compliance_status") == "PASSED"),
+                        "nist_fail": sum(1 for f in findings if f.get("benchmark") == "nist-800-53" and f.get("compliance_status") != "PASSED"),
+                    }
+                    # Collect all findings for detailed report
+                    all_findings.extend(findings)
             
             if not account_scores:
-                raise Exception("No CSPM scores found")
+                raise Exception("No CSPM findings found")
             
-            # Generate CSPM report (XLSX only)
-            attachment_path = generate_cspm_report(account_scores)
+            # Generate CSPM report with detailed findings
+            attachment_path = generate_cspm_report(account_scores, findings_data=all_findings)
         
         # Send email
         mail = GraphMailClient()

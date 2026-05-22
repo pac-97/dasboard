@@ -91,8 +91,18 @@ def get_inspector_email_template(account_findings: dict[str, dict]) -> str:
         </div>
         
         <div class="section">
+            <h2>What's Included</h2>
+            <p><strong>This is an AWS Inspector ONLY report.</strong> All Inspector vulnerability findings are included in the attached XLSX file with complete details for each finding.</p>
+            <ul>
+                <li>Summary statistics by account (above table)</li>
+                <li><strong>Detailed Findings Sheet:</strong> All Inspector findings with severity, description, affected resources, remediation steps, and more</li>
+                <li>Coverage percentage indicates the portion of your resources scanned for vulnerabilities</li>
+            </ul>
+        </div>
+        
+        <div class="section">
             <h2>Action Required</h2>
-            <p>Please review the attached XLSX report for detailed findings. AWS Inspector coverage percentage indicates what percentage of your resources have been scanned.</p>
+            <p>Please review the attached XLSX report for detailed findings and take appropriate remediation actions.</p>
             <ul>
                 <li><strong>Critical Findings:</strong> Address immediately to reduce security risk</li>
                 <li><strong>High Findings:</strong> Address within short timeframe (30 days)</li>
@@ -218,6 +228,16 @@ def get_cspm_email_template(account_scores: dict[str, dict]) -> str:
                     <div class="metric-value">{sum(d.get('cis_fail', 0) + d.get('nist_fail', 0) for d in account_scores.values())}</div>
                 </div>
             </div>
+        </div>
+        
+        <div class="section">
+            <h2>What's Included</h2>
+            <p><strong>This is a CSPM (Cloud Security Posture Management) ONLY report.</strong> All compliance findings are included in the attached XLSX file with complete details for each control.</p>
+            <ul>
+                <li>Compliance scores against CIS and NIST benchmarks (above table)</li>
+                <li><strong>Detailed Findings Sheet:</strong> All failed and passed controls with benchmark, control ID, severity, description, and remediation details</li>
+                <li>Pass/Fail counts per benchmark per account</li>
+            </ul>
         </div>
         
         <div class="section">

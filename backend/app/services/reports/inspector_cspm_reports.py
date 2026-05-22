@@ -11,9 +11,9 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def generate_inspector_report(account_findings: dict[str, dict], output_path: str | None = None) -> str:
+def generate_inspector_report(account_findings: dict[str, dict], findings_data: list[dict] | None = None, output_path: str | None = None) -> str:
     """
-    Generate Inspector-only XLSX report.
+    Generate Inspector-only XLSX report with summary and detailed findings.
     
     Args:
         account_findings: Dict mapping account_id to {
@@ -23,6 +23,7 @@ def generate_inspector_report(account_findings: dict[str, dict], output_path: st
             total: int,
             coverage: float (%)
         }
+        findings_data: List of detailed finding dictionaries (optional)
         output_path: Optional custom output path
     
     Returns:
@@ -37,7 +38,13 @@ def generate_inspector_report(account_findings: dict[str, dict], output_path: st
     )
 
     workbook = xlsxwriter.Workbook(filename)
-    worksheet = workbook.add_worksheet("Inspector Findings")
+    
+    # Summary worksheet
+    summary_sheet = workbook.add_worksheet("Summary")
+    
+    # Detailed findings worksheet if data provided
+    if findings_data:
+        findings_sheet = workbook.add_worksheet("All Findings")
     
     # Define formats
     header_format = workbook.add_format({
@@ -83,36 +90,147 @@ def generate_inspector_report(account_findings: dict[str, dict], output_path: st
         "font_color": "#FDBA74",
     })
     
-    # Headers
+    # ===== SUMMARY SHEET =====
+    # Headers for summary
     headers = ["Account Number", "Account Name", "Inspector Coverage", "Critical", "High", "All"]
     for col, header in enumerate(headers):
-        worksheet.write(0, col, header, header_format)
+        summary_sheet.write(0, col, header, header_format)
     
-    # Set column widths
-    worksheet.set_column(0, 0, 16)
-    worksheet.set_column(1, 1, 25)
-    worksheet.set_column(2, 2, 18)
-    worksheet.set_column(3, 5, 12)
+    # Set column widths for summary
+    summary_sheet.set_column(0, 0, 16)
+    summary_sheet.set_column(1, 1, 25)
+    summary_sheet.set_column(2, 2, 18)
+    summary_sheet.set_column(3, 5, 12)
     
-    # Data rows
+    # Data rows for summary
     row = 1
     for account_id, data in sorted(account_findings.items()):
-        worksheet.write(row, 0, account_id, data_format)
-        worksheet.write(row, 1, data.get("account_name", account_id), data_format)
-        worksheet.write(row, 2, data.get("coverage", 0) / 100.0, percentage_format)
-        worksheet.write(row, 3, data.get("critical", 0), critical_format)
-        worksheet.write(row, 4, data.get("high", 0), high_format)
-        worksheet.write(row, 5, data.get("total", 0), number_format)
+        summary_sheet.write(row, 0, account_id, data_format)
+        summary_sheet.write(row, 1, data.get("account_name", account_id), data_format)
+        summary_sheet.write(row, 2, data.get("coverage", 0) / 100.0, percentage_format)
+        summary_sheet.write(row, 3, data.get("critical", 0), critical_format)
+        summary_sheet.write(row, 4, data.get("high", 0), high_format)
+        summary_sheet.write(row, 5, data.get("total", 0), number_format)
         row += 1
+    
+    # ===== DETAILED FINDINGS SHEET =====
+    if findings_data:
+        # Format for severity columns
+        severity_critical = workbook.add_format({
+            "border": 1,
+            "align": "left",
+            "bg_color": "#7F1D1D",
+            "font_color": "#FCA5A5",
+            "text_wrap": True,
+        })
+        
+        severity_high = workbook.add_format({
+            "border": 1,
+            "align": "left",
+            "bg_color": "#7C2D12",
+            "font_color": "#FDBA74",
+            "text_wrap": True,
+        })
+        
+        severity_medium = workbook.add_format({
+            "border": 1,
+            "align": "left",
+            "bg_color": "#854D0E",
+            "font_color": "#FED7AA",
+            "text_wrap": True,
+        })
+        
+        text_format = workbook.add_format({
+            "border": 1,
+            "align": "left",
+            "valign": "top",
+            "text_wrap": True,
+        })
+        
+        # Headers for detailed findings
+        finding_headers = [
+            "Account Number",
+            "Account Name", 
+            "Severity",
+            "Title",
+            "Description",
+            "Resource Type",
+            "Resource ID",
+            "Region",
+            "CVE IDs",
+            "Fix Available",
+            "First Observed",
+            "Last Observed",
+            "Remediation"
+        ]
+        for col, header in enumerate(finding_headers):
+            findings_sheet.write(0, col, header, header_format)
+        
+        # Set column widths for findings
+        findings_sheet.set_column(0, 0, 16)  # Account Number
+        findings_sheet.set_column(1, 1, 25)  # Account Name
+        findings_sheet.set_column(2, 2, 12)  # Severity
+        findings_sheet.set_column(3, 3, 30)  # Title
+        findings_sheet.set_column(4, 4, 40)  # Description
+        findings_sheet.set_column(5, 5, 18)  # Resource Type
+        findings_sheet.set_column(6, 6, 30)  # Resource ID
+        findings_sheet.set_column(7, 7, 12)  # Region
+        findings_sheet.set_column(8, 8, 20)  # CVE IDs
+        findings_sheet.set_column(9, 9, 12)  # Fix Available
+        findings_sheet.set_column(10, 10, 18)  # First Observed
+        findings_sheet.set_column(11, 11, 18)  # Last Observed
+        findings_sheet.set_column(12, 12, 35)  # Remediation
+        
+        # Write findings data
+        f_row = 1
+        for finding in sorted(findings_data, key=lambda x: (x.get("account_id", ""), x.get("severity", ""), -x.get("created_at", 0))):
+            severity = finding.get("severity", "LOW").upper()
+            
+            # Choose format based on severity
+            if severity == "CRITICAL":
+                sev_format = severity_critical
+            elif severity == "HIGH":
+                sev_format = severity_high
+            elif severity == "MEDIUM":
+                sev_format = severity_medium
+            else:
+                sev_format = text_format
+            
+            findings_sheet.write(f_row, 0, finding.get("account_id", ""), data_format)
+            findings_sheet.write(f_row, 1, finding.get("account_name", ""), data_format)
+            findings_sheet.write(f_row, 2, severity, sev_format)
+            findings_sheet.write(f_row, 3, finding.get("title", ""), text_format)
+            findings_sheet.write(f_row, 4, finding.get("description", ""), text_format)
+            findings_sheet.write(f_row, 5, finding.get("resource_type", ""), data_format)
+            findings_sheet.write(f_row, 6, finding.get("resource_id", ""), data_format)
+            findings_sheet.write(f_row, 7, finding.get("region", ""), data_format)
+            findings_sheet.write(f_row, 8, finding.get("cve_ids", ""), data_format)
+            findings_sheet.write(f_row, 9, "Yes" if finding.get("fix_available") else "No", data_format)
+            
+            # Format dates
+            first_obs = finding.get("first_observed_at")
+            if first_obs:
+                findings_sheet.write(f_row, 10, str(first_obs)[:16], data_format)
+            else:
+                findings_sheet.write(f_row, 10, "", data_format)
+            
+            last_obs = finding.get("last_observed_at")
+            if last_obs:
+                findings_sheet.write(f_row, 11, str(last_obs)[:16], data_format)
+            else:
+                findings_sheet.write(f_row, 11, "", data_format)
+            
+            findings_sheet.write(f_row, 12, finding.get("remediation", ""), text_format)
+            f_row += 1
     
     workbook.close()
     logger.info("inspector_report_generated", path=filename, accounts=len(account_findings))
     return filename
 
 
-def generate_cspm_report(account_scores: dict[str, dict], output_path: str | None = None) -> str:
+def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[dict] | None = None, output_path: str | None = None) -> str:
     """
-    Generate CSPM-only XLSX report from S3 scores.
+    Generate CSPM-only XLSX report with summary and detailed findings.
     
     Args:
         account_scores: Dict mapping account_id to {
@@ -124,6 +242,7 @@ def generate_cspm_report(account_scores: dict[str, dict], output_path: str | Non
             nist_pass: int,
             nist_fail: int,
         }
+        findings_data: List of detailed finding dictionaries (optional)
         output_path: Optional custom output path
     
     Returns:
@@ -138,7 +257,13 @@ def generate_cspm_report(account_scores: dict[str, dict], output_path: str | Non
     )
 
     workbook = xlsxwriter.Workbook(filename)
-    worksheet = workbook.add_worksheet("CSPM Benchmark Scores")
+    
+    # Summary worksheet
+    summary_sheet = workbook.add_worksheet("Summary")
+    
+    # Detailed findings worksheet if data provided
+    if findings_data:
+        findings_sheet = workbook.add_worksheet("All Findings")
     
     # Define formats
     header_format = workbook.add_format({
@@ -178,28 +303,112 @@ def generate_cspm_report(account_scores: dict[str, dict], output_path: str | Non
         "font_color": "#FCA5A5",
     })
     
-    # Headers
+    # ===== SUMMARY SHEET =====
+    # Headers for summary
     headers = ["Account Number", "Account Name", "CIS Score", "CIS Pass", "CIS Fail", "NIST Score", "NIST Pass", "NIST Fail"]
     for col, header in enumerate(headers):
-        worksheet.write(0, col, header, header_format)
+        summary_sheet.write(0, col, header, header_format)
     
-    # Set column widths
-    worksheet.set_column(0, 0, 16)
-    worksheet.set_column(1, 1, 25)
-    worksheet.set_column(2, 7, 14)
+    # Set column widths for summary
+    summary_sheet.set_column(0, 0, 16)
+    summary_sheet.set_column(1, 1, 25)
+    summary_sheet.set_column(2, 7, 14)
     
-    # Data rows
+    # Data rows for summary
     row = 1
     for account_id, data in sorted(account_scores.items()):
-        worksheet.write(row, 0, account_id, data_format)
-        worksheet.write(row, 1, data.get("account_name", account_id), data_format)
-        worksheet.write(row, 2, data.get("cis_score", 0), score_format)
-        worksheet.write(row, 3, data.get("cis_pass", 0), pass_format)
-        worksheet.write(row, 4, data.get("cis_fail", 0), fail_format)
-        worksheet.write(row, 5, data.get("nist_score", 0), score_format)
-        worksheet.write(row, 6, data.get("nist_pass", 0), pass_format)
-        worksheet.write(row, 7, data.get("nist_fail", 0), fail_format)
+        summary_sheet.write(row, 0, account_id, data_format)
+        summary_sheet.write(row, 1, data.get("account_name", account_id), data_format)
+        summary_sheet.write(row, 2, data.get("cis_score", 0), score_format)
+        summary_sheet.write(row, 3, data.get("cis_pass", 0), pass_format)
+        summary_sheet.write(row, 4, data.get("cis_fail", 0), fail_format)
+        summary_sheet.write(row, 5, data.get("nist_score", 0), score_format)
+        summary_sheet.write(row, 6, data.get("nist_pass", 0), pass_format)
+        summary_sheet.write(row, 7, data.get("nist_fail", 0), fail_format)
         row += 1
+    
+    # ===== DETAILED FINDINGS SHEET =====
+    if findings_data:
+        # Formats for compliance status
+        passed_format = workbook.add_format({
+            "border": 1,
+            "align": "left",
+            "bg_color": "#064E3B",
+            "font_color": "#86EFAC",
+            "text_wrap": True,
+        })
+        
+        failed_format = workbook.add_format({
+            "border": 1,
+            "align": "left",
+            "bg_color": "#7F1D1D",
+            "font_color": "#FCA5A5",
+            "text_wrap": True,
+        })
+        
+        text_format = workbook.add_format({
+            "border": 1,
+            "align": "left",
+            "valign": "top",
+            "text_wrap": True,
+        })
+        
+        # Headers for detailed findings
+        finding_headers = [
+            "Account Number",
+            "Account Name",
+            "Benchmark",
+            "Control ID",
+            "Compliance Status",
+            "Severity",
+            "Title",
+            "Description",
+            "Resource Type",
+            "Resource ID",
+            "Region",
+            "Remediation URL"
+        ]
+        for col, header in enumerate(finding_headers):
+            findings_sheet.write(0, col, header, header_format)
+        
+        # Set column widths for findings
+        findings_sheet.set_column(0, 0, 16)  # Account Number
+        findings_sheet.set_column(1, 1, 25)  # Account Name
+        findings_sheet.set_column(2, 2, 18)  # Benchmark
+        findings_sheet.set_column(3, 3, 20)  # Control ID
+        findings_sheet.set_column(4, 4, 18)  # Compliance Status
+        findings_sheet.set_column(5, 5, 14)  # Severity
+        findings_sheet.set_column(6, 6, 30)  # Title
+        findings_sheet.set_column(7, 7, 40)  # Description
+        findings_sheet.set_column(8, 8, 18)  # Resource Type
+        findings_sheet.set_column(9, 9, 30)  # Resource ID
+        findings_sheet.set_column(10, 10, 12)  # Region
+        findings_sheet.set_column(11, 11, 40)  # Remediation URL
+        
+        # Write findings data
+        f_row = 1
+        for finding in sorted(findings_data, key=lambda x: (x.get("account_id", ""), x.get("benchmark", ""), x.get("compliance_status", ""))):
+            compliance_status = finding.get("compliance_status", "FAILED").upper()
+            
+            # Choose format based on compliance status
+            if compliance_status == "PASSED":
+                comp_format = passed_format
+            else:
+                comp_format = failed_format
+            
+            findings_sheet.write(f_row, 0, finding.get("account_id", ""), data_format)
+            findings_sheet.write(f_row, 1, finding.get("account_name", ""), data_format)
+            findings_sheet.write(f_row, 2, finding.get("benchmark", ""), data_format)
+            findings_sheet.write(f_row, 3, finding.get("control_id", ""), data_format)
+            findings_sheet.write(f_row, 4, compliance_status, comp_format)
+            findings_sheet.write(f_row, 5, finding.get("severity", ""), data_format)
+            findings_sheet.write(f_row, 6, finding.get("title", ""), text_format)
+            findings_sheet.write(f_row, 7, finding.get("description", ""), text_format)
+            findings_sheet.write(f_row, 8, finding.get("resource_type", ""), data_format)
+            findings_sheet.write(f_row, 9, finding.get("resource_id", ""), data_format)
+            findings_sheet.write(f_row, 10, finding.get("region", ""), data_format)
+            findings_sheet.write(f_row, 11, finding.get("remediation_url", ""), data_format)
+            f_row += 1
     
     workbook.close()
     logger.info("cspm_report_generated", path=filename, accounts=len(account_scores))
