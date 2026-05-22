@@ -1,59 +1,37 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import extract, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.models.email import EmailDeliveryLog
 from app.models.owner import AccountOwner, OwnerMapping
 from app.services.aws.live_data import get_account_by_id, get_live_snapshot, fetch_account_inspector_findings, fetch_account_cspm_findings
-from app.services.charts.account_chart import generate_multi_account_chart
+from app.services.aws.s3_cspm_scores import get_cspm_scores_from_s3
+from app.services.email.email_templates import get_inspector_email_template, get_cspm_email_template
+from app.services.reports.inspector_cspm_reports import generate_inspector_report, generate_cspm_report
 from app.services.email.graph_client import GraphMailClient
-from app.services.reports.combined_report import generate_combined_account_report
 
 router = APIRouter()
 
 
 class ComposePreviewRequest(BaseModel):
     account_ids: list[str]
+    finding_type: str = "inspector"  # "inspector" or "cspm"
 
 
 class SendEmailRequest(BaseModel):
     account_ids: list[str]
+    finding_type: str = "inspector"  # "inspector" or "cspm"
     to_emails: list[EmailStr]
     cc_emails: list[EmailStr] = []
     subject: str
     body_html: str
     confirmed: bool = False
-
-
-def _default_subject(account_names: list[str]) -> str:
-    if len(account_names) == 1:
-        return f"AWS Security Findings Report — {account_names[0]}"
-    return f"AWS Security Findings Report — {len(account_names)} Accounts"
-
-
-def _default_body(account_rows: list[dict]) -> str:
-    rows_html = "".join(
-        f"<tr><td style='padding:8px;border:1px solid #334155;'>{a.get('account_name')}</td>"
-        f"<td style='padding:8px;border:1px solid #334155;'>{a.get('inspector_total', 0)}</td>"
-        f"<td style='padding:8px;border:1px solid #334155;color:#EF4444;'>{a.get('inspector_critical', 0)}</td>"
-        f"<td style='padding:8px;border:1px solid #334155;color:#F97316;'>{a.get('inspector_high', 0)}</td>"
-        f"<td style='padding:8px;border:1px solid #334155;'>{a.get('cspm_score', 0)}%</td></tr>"
-        for a in account_rows
-    )
-    return f"""<html><body style="font-family:Segoe UI,sans-serif;background:#0F172A;color:#E2E8F0;padding:24px;">
-<h2>AWS Security Findings Summary</h2>
-<p>Please find attached the detailed XLSX report and findings chart for your account(s).</p>
-<table style="border-collapse:collapse;width:100%;max-width:720px;">
-<tr style="background:#1E293B;"><th style="padding:8px;">Account</th><th>Inspector</th><th>Critical</th><th>High</th><th>CSPM Score</th></tr>
-{rows_html}
-</table>
-<p style="color:#94A3B8;font-size:12px;">Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</p>
-</body></html>"""
 
 
 async def _resolve_owner_emails(session: AsyncSession, account_ids: list[str]) -> list[str]:
@@ -74,19 +52,68 @@ async def _resolve_owner_emails(session: AsyncSession, account_ids: list[str]) -
 async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession = Depends(get_db)):
     if not payload.account_ids:
         raise HTTPException(400, "Select at least one account")
+    
+    finding_type = payload.finding_type.lower()
+    if finding_type not in ["inspector", "cspm"]:
+        raise HTTPException(400, "finding_type must be 'inspector' or 'cspm'")
 
     snapshot = await get_live_snapshot(force=False)
     account_rows = [get_account_by_id(snapshot.get("accounts", []), aid) for aid in payload.account_ids]
     account_rows = [r for r in account_rows if r]
 
+    if not account_rows:
+        raise HTTPException(400, "No valid accounts found")
+
     names = [r.get("account_name", r.get("account_id")) for r in account_rows]
     suggested_to = await _resolve_owner_emails(session, payload.account_ids)
 
+    if finding_type == "inspector":
+        # Parallel fetch for Inspector findings
+        inspector_data = await asyncio.gather(
+            *[fetch_account_inspector_findings(aid, r.get("account_name")) 
+              for aid, r in zip(payload.account_ids, account_rows)],
+            return_exceptions=True
+        )
+        
+        account_findings = {}
+        for account_id, data in zip(payload.account_ids, inspector_data):
+            if isinstance(data, Exception):
+                continue
+            if data.get("status") == "completed":
+                findings = data.get("findings", [])
+                stats = data.get("stats", {})
+                account_findings[account_id] = {
+                    "account_name": data.get("account_name", account_id),
+                    "critical": stats.get("critical", 0),
+                    "high": stats.get("high", 0),
+                    "total": stats.get("total", 0),
+                    "coverage": stats.get("coverage", 0),
+                }
+        
+        body_html = get_inspector_email_template(account_findings)
+        subject = f"AWS Inspector Findings Report — {', '.join(names[:2])}" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
+    
+    else:  # CSPM
+        # Fetch CSPM scores from S3
+        cspm_scores = get_cspm_scores_from_s3()
+        account_scores = {aid: cspm_scores.get(aid, {
+            "cis_score": 0, "nist_score": 0, "cis_pass": 0, "cis_fail": 0, "nist_pass": 0, "nist_fail": 0
+        }) for aid in payload.account_ids}
+        
+        # Enrich with account names
+        for aid, data in account_scores.items():
+            account = next((r for r in account_rows if r.get("account_id") == aid), {})
+            data["account_name"] = account.get("account_name", aid)
+        
+        body_html = get_cspm_email_template(account_scores)
+        subject = f"AWS CSPM Compliance Report — {', '.join(names[:2])}" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
+
     return {
-        "subject": _default_subject(names),
-        "body_html": _default_body(account_rows),
+        "subject": subject,
+        "body_html": body_html,
         "suggested_to": suggested_to,
         "account_rows": account_rows,
+        "finding_type": finding_type,
     }
 
 
@@ -98,51 +125,91 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
         raise HTTPException(400, "Select at least one account")
     if not payload.to_emails:
         raise HTTPException(400, "At least one recipient required")
+    
+    finding_type = payload.finding_type.lower()
+    if finding_type not in ["inspector", "cspm"]:
+        raise HTTPException(400, "finding_type must be 'inspector' or 'cspm'")
 
-    snapshot = await get_live_snapshot(force=True)
+    snapshot = await get_live_snapshot(force=False)
     account_rows = [get_account_by_id(snapshot.get("accounts", []), aid) for aid in payload.account_ids]
     account_rows = [r for r in account_rows if r]
-
-    # Fetch findings for each account (on-demand)
-    inspector = []
-    cspm = []
-    for account_id in payload.account_ids:
-        account = next((a for a in account_rows if a and a.get("account_id") == account_id), None)
-        if account:
-            inspector_result = await fetch_account_inspector_findings(account_id, account.get("account_name"))
-            cspm_result = await fetch_account_cspm_findings(account_id, account.get("account_name"))
-            if inspector_result.get("status") == "completed":
-                inspector.extend(inspector_result.get("findings", []))
-            if cspm_result.get("status") == "completed":
-                cspm.extend(cspm_result.get("findings", []))
-
-    xlsx_path = generate_combined_account_report(
-        payload.account_ids, inspector, cspm, snapshot
-    )
-    chart_path = generate_multi_account_chart(account_rows)
-
+    
+    if not account_rows:
+        raise HTTPException(400, "No valid accounts found")
+    
+    attachment_path = None
     status = "failed"
     error: str | None = None
+    
     try:
+        if finding_type == "inspector":
+            # Parallel fetch for Inspector findings (optimized)
+            inspector_results = await asyncio.gather(
+                *[fetch_account_inspector_findings(aid, r.get("account_name")) 
+                  for aid, r in zip(payload.account_ids, account_rows)],
+                return_exceptions=True
+            )
+            
+            account_findings = {}
+            for account_id, result in zip(payload.account_ids, inspector_results):
+                if isinstance(result, Exception):
+                    continue
+                if result.get("status") == "completed":
+                    stats = result.get("stats", {})
+                    account_findings[account_id] = {
+                        "account_name": result.get("account_name", account_id),
+                        "critical": stats.get("critical", 0),
+                        "high": stats.get("high", 0),
+                        "total": stats.get("total", 0),
+                        "coverage": stats.get("coverage", 0),
+                    }
+            
+            if not account_findings:
+                raise Exception("No findings retrieved from Inspector")
+            
+            # Generate Inspector report (XLSX only)
+            attachment_path = generate_inspector_report(account_findings)
+        
+        else:  # CSPM
+            # Fetch CSPM scores from S3 (no AWS API calls needed - faster)
+            cspm_scores = get_cspm_scores_from_s3()
+            account_scores = {aid: cspm_scores.get(aid, {
+                "cis_score": 0, "nist_score": 0, "cis_pass": 0, "cis_fail": 0, "nist_pass": 0, "nist_fail": 0
+            }) for aid in payload.account_ids}
+            
+            # Enrich with account names
+            for aid in payload.account_ids:
+                account = next((r for r in account_rows if r.get("account_id") == aid), {})
+                account_scores[aid]["account_name"] = account.get("account_name", aid)
+            
+            if not account_scores:
+                raise Exception("No CSPM scores found")
+            
+            # Generate CSPM report (XLSX only)
+            attachment_path = generate_cspm_report(account_scores)
+        
+        # Send email
         mail = GraphMailClient()
         await mail.send_mail(
             to_emails=[str(e) for e in payload.to_emails],
             cc_emails=[str(e) for e in payload.cc_emails],
             subject=payload.subject,
             html_body=payload.body_html,
-            attachments=[xlsx_path, chart_path],
+            attachments=[attachment_path] if attachment_path else [],
         )
         status = "sent"
+    
     except Exception as exc:
         error = str(exc)
 
+    # Log email delivery
     sent_month = datetime.now(timezone.utc).strftime("%Y-%m")
     log = EmailDeliveryLog(
         recipient_email=",".join(str(e) for e in payload.to_emails),
         subject=payload.subject,
         status=status,
         account_ids=json.dumps(payload.account_ids),
-        attachments=json.dumps([xlsx_path, chart_path]),
+        attachments=json.dumps([attachment_path] if attachment_path else []),
         cc_emails=",".join(str(e) for e in payload.cc_emails) if payload.cc_emails else None,
         html_body=payload.body_html[:8000] if payload.body_html else None,
         sent_month=sent_month,
@@ -151,15 +218,16 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
     )
     session.add(log)
     await session.flush()
-
-    if status != "sent":
+    await session.commit()
+    
+    if status == "failed":
         raise HTTPException(500, f"Failed to send email: {error}")
-
+    
     return {
         "status": "sent",
         "message": "Email sent successfully",
-        "attachments": [xlsx_path, chart_path],
         "log_id": log.id,
+        "timestamp": sent_month,
     }
 
 
