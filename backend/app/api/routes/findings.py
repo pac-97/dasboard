@@ -1,63 +1,73 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from app.services.aws.live_data import filter_findings_for_accounts, get_live_snapshot
+from app.core.logging import get_logger
+from app.services.aws.live_data import (
+    fetch_account_cspm_findings,
+    fetch_account_inspector_findings,
+    get_account_by_id,
+    get_live_snapshot,
+)
 
+logger = get_logger(__name__)
 router = APIRouter()
 
 
-@router.get("/inspector")
-async def list_inspector_findings(
-    account_id: str | None = None,
-    severity: str | None = None,
-    region: str | None = None,
-    resource_type: str | None = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
-    refresh: bool = Query(False),
-):
+@router.get("/accounts")
+async def list_accounts(refresh: bool = Query(False)):
+    """Get organization accounts list (lightweight, no findings)."""
     snapshot = await get_live_snapshot(force=refresh)
-    findings = snapshot.get("inspector_findings", [])
-    if account_id:
-        findings = [f for f in findings if f.get("account_id") == account_id]
-    if severity:
-        findings = [f for f in findings if f.get("severity") == severity.upper()]
-    if region:
-        findings = [f for f in findings if f.get("region") == region]
-    if resource_type:
-        findings = [f for f in findings if f.get("resource_type") == resource_type]
-
-    start = (page - 1) * page_size
-    return findings[start : start + page_size]
+    return {
+        "accounts": snapshot.get("accounts", []),
+        "account_count": snapshot.get("account_count", 0),
+        "fetched_at": snapshot.get("fetched_at"),
+    }
 
 
-@router.get("/inspector/count")
-async def inspector_count(account_id: str | None = None, severity: str | None = None, refresh: bool = False):
-    snapshot = await get_live_snapshot(force=refresh)
-    findings = snapshot.get("inspector_findings", [])
-    if account_id:
-        findings = [f for f in findings if f.get("account_id") == account_id]
-    if severity:
-        findings = [f for f in findings if f.get("severity") == severity.upper()]
-    return {"count": len(findings)}
+@router.post("/inspector/fetch-account/{account_id}")
+async def fetch_inspector_account(account_id: str):
+    """Fetch Inspector findings for a specific account on-demand."""
+    # Get account details from account list
+    snapshot = await get_live_snapshot()
+    account = get_account_by_id(snapshot.get("accounts", []), account_id)
+    
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+    
+    # Fetch findings for this account
+    result = await fetch_account_inspector_findings(account_id, account.get("account_name"))
+    
+    if result.get("status") == "failed":
+        raise HTTPException(status_code=500, detail=f"Failed to fetch findings: {result.get('error')}")
+    
+    return {
+        "account_id": result["account_id"],
+        "account_name": result["account_name"],
+        "findings": result["findings"],
+        "stats": result["stats"],
+        "fetched_at": result["fetched_at"],
+    }
 
 
-@router.get("/cspm")
-async def list_cspm_findings(
-    account_id: str | None = None,
-    benchmark: str | None = None,
-    compliance_status: str | None = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
-    refresh: bool = Query(False),
-):
-    snapshot = await get_live_snapshot(force=refresh)
-    findings = snapshot.get("cspm_findings", [])
-    if account_id:
-        findings = [f for f in findings if f.get("account_id") == account_id]
-    if benchmark:
-        findings = [f for f in findings if benchmark.lower() in (f.get("benchmark") or "").lower()]
-    if compliance_status:
-        findings = [f for f in findings if f.get("compliance_status") == compliance_status.upper()]
-
-    start = (page - 1) * page_size
-    return findings[start : start + page_size]
+@router.post("/cspm/fetch-account/{account_id}")
+async def fetch_cspm_account(account_id: str):
+    """Fetch CSPM findings for a specific account on-demand."""
+    # Get account details from account list
+    snapshot = await get_live_snapshot()
+    account = get_account_by_id(snapshot.get("accounts", []), account_id)
+    
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+    
+    # Fetch findings for this account
+    result = await fetch_account_cspm_findings(account_id, account.get("account_name"))
+    
+    if result.get("status") == "failed":
+        raise HTTPException(status_code=500, detail=f"Failed to fetch findings: {result.get('error')}")
+    
+    return {
+        "account_id": result["account_id"],
+        "account_name": result["account_name"],
+        "findings": result["findings"],
+        "stats": result["stats"],
+        "fetched_at": result["fetched_at"],
+    }

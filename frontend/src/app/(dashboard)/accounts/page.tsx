@@ -1,26 +1,37 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, RefreshCw, Search, CheckSquare, Square } from "lucide-react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { Mail, RefreshCw, Search, AlertCircle, Loader2 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmailComposeDialog } from "@/components/email/email-compose-dialog";
 import { api, AccountRow } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+// Types for on-demand fetching
+type FetchStatus = "not_fetched" | "fetching" | "completed" | "failed";
+type AccountStatus = {
+  inspectorStatus: FetchStatus;
+  inspectorCount: number | null;
+  inspectorError?: string;
+  cspmStatus: FetchStatus;
+  cspmCount: number | null;
+  cspmError?: string;
+};
+
 export default function AccountsPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailAccounts, setEmailAccounts] = useState<string[]>([]);
-  const [tab, setTab] = useState<"accounts" | "logs">("accounts");
+  const [tab, setTab] = useState<"inspector" | "cspm" | "logs">("inspector");
   const [logMonth, setLogMonth] = useState("");
+  const [accountStatus, setAccountStatus] = useState<Record<string, AccountStatus>>({});
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ["accounts-live"],
-    queryFn: () => api.accountsLive(false),
+    queryFn: () => api.accountsList(false),
     refetchOnWindowFocus: false,
   });
 
@@ -28,6 +39,75 @@ export default function AccountsPage() {
     queryKey: ["email-logs", logMonth],
     queryFn: () => api.emailLogs(logMonth || undefined),
     enabled: tab === "logs",
+  });
+
+  // Mutations for per-account fetching
+  const inspectorMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      setAccountStatus((prev) => ({
+        ...prev,
+        [accountId]: {
+          ...prev[accountId],
+          inspectorStatus: "fetching",
+        },
+      }));
+      const result = await api.fetchInspectorAccount(accountId);
+      return { accountId, result };
+    },
+    onSuccess: ({ accountId, result }) => {
+      setAccountStatus((prev) => ({
+        ...prev,
+        [accountId]: {
+          ...prev[accountId],
+          inspectorStatus: "completed",
+          inspectorCount: result.findings?.length || 0,
+        },
+      }));
+    },
+    onError: (error, accountId) => {
+      setAccountStatus((prev) => ({
+        ...prev,
+        [accountId]: {
+          ...prev[accountId],
+          inspectorStatus: "failed",
+          inspectorError: (error as Error).message,
+        },
+      }));
+    },
+  });
+
+  const cspmMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      setAccountStatus((prev) => ({
+        ...prev,
+        [accountId]: {
+          ...prev[accountId],
+          cspmStatus: "fetching",
+        },
+      }));
+      const result = await api.fetchCspmAccount(accountId);
+      return { accountId, result };
+    },
+    onSuccess: ({ accountId, result }) => {
+      setAccountStatus((prev) => ({
+        ...prev,
+        [accountId]: {
+          ...prev[accountId],
+          cspmStatus: "completed",
+          cspmCount: result.findings?.length || 0,
+        },
+      }));
+    },
+    onError: (error, accountId) => {
+      setAccountStatus((prev) => ({
+        ...prev,
+        [accountId]: {
+          ...prev[accountId],
+          cspmStatus: "failed",
+          cspmError: (error as Error).message,
+        },
+      }));
+    },
   });
 
   const accounts = data?.accounts ?? [];
@@ -38,28 +118,9 @@ export default function AccountsPage() {
       (a) =>
         a.account_name.toLowerCase().includes(q) ||
         a.account_id.includes(q) ||
-        (a.owner_email || "").toLowerCase().includes(q)
+        (a.email || "").toLowerCase().includes(q)
     );
   }, [accounts, search]);
-
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
-    if (selected.size === filtered.length) setSelected(new Set());
-    else setSelected(new Set(filtered.map((a) => a.account_id)));
-  };
-
-  const openEmail = (ids: string[]) => {
-    setEmailAccounts(ids);
-    setEmailOpen(true);
-  };
 
   const fetchedLabel = data?.fetched_at
     ? new Date(data.fetched_at * 1000).toLocaleString()
@@ -68,16 +129,22 @@ export default function AccountsPage() {
   return (
     <div>
       <Topbar
-        title="Accounts & Email"
-        subtitle={`Live AWS data · ${data?.account_count ?? "—"} accounts · Last fetch: ${fetchedLabel}`}
+        title="Findings & Email"
+        subtitle={`Live AWS data · ${data?.account_count ?? "—"} accounts · Last refresh: ${fetchedLabel}`}
       />
 
       <div className="px-8 pt-4 flex gap-2 border-b border-border/50">
         <button
-          onClick={() => setTab("accounts")}
-          className={cn("px-4 py-2 text-sm font-medium rounded-t-lg", tab === "accounts" ? "bg-card text-primary" : "text-muted-foreground")}
+          onClick={() => setTab("inspector")}
+          className={cn("px-4 py-2 text-sm font-medium rounded-t-lg", tab === "inspector" ? "bg-card text-primary" : "text-muted-foreground")}
         >
-          All Accounts
+          Inspector Findings
+        </button>
+        <button
+          onClick={() => setTab("cspm")}
+          className={cn("px-4 py-2 text-sm font-medium rounded-t-lg", tab === "cspm" ? "bg-card text-primary" : "text-muted-foreground")}
+        >
+          CSPM Findings
         </button>
         <button
           onClick={() => setTab("logs")}
@@ -88,7 +155,7 @@ export default function AccountsPage() {
       </div>
 
       <div className="p-8 space-y-4">
-        {tab === "accounts" && (
+        {(tab === "inspector" || tab === "cspm") && (
           <>
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[200px] max-w-md">
@@ -96,7 +163,7 @@ export default function AccountsPage() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search account, ID, owner…"
+                  placeholder="Search account, ID, email…"
                   className="w-full rounded-lg border border-border bg-muted/30 py-2 pl-10 pr-4 text-sm"
                 />
               </div>
@@ -106,17 +173,8 @@ export default function AccountsPage() {
                 className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm hover:bg-muted"
               >
                 <RefreshCw className={cn("h-4 w-4", isFetching && "animate-spin")} />
-                Refresh from AWS
+                Refresh Accounts
               </button>
-              {selected.size > 0 && (
-                <button
-                  onClick={() => openEmail(Array.from(selected))}
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground"
-                >
-                  <Mail className="h-4 w-4" />
-                  Email {selected.size} Selected
-                </button>
-              )}
             </div>
 
             {error && (
@@ -128,29 +186,25 @@ export default function AccountsPage() {
             )}
 
             {isLoading ? (
-              <div className="text-center py-20 text-muted-foreground">Fetching live findings from AWS…</div>
+              <div className="text-center py-20 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3" />
+                Fetching account list…
+              </div>
             ) : (
               <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>Organization Accounts</CardTitle>
-                  <button onClick={toggleAll} className="text-xs text-primary hover:underline">
-                    {selected.size === filtered.length ? "Deselect all" : "Select all visible"}
-                  </button>
+                <CardHeader>
+                  <CardTitle>{tab === "inspector" ? "Inspector Findings" : "CSPM Findings"}</CardTitle>
                 </CardHeader>
                 <CardContent className="overflow-x-auto p-0">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-muted/20 text-left text-muted-foreground">
-                        <th className="p-3 w-10" />
-                        <th className="p-3">Account</th>
-                        <th className="p-3">Inspector</th>
-                        <th className="p-3">Critical</th>
-                        <th className="p-3">High</th>
-                        <th className="p-3">CSPM Score</th>
-                        <th className="p-3">CIS</th>
-                        <th className="p-3">NIST</th>
-                        <th className="p-3">Owner</th>
-                        <th className="p-3">Action</th>
+                        <th className="p-3">Account Name</th>
+                        <th className="p-3">Account ID</th>
+                        <th className="p-3">Email</th>
+                        <th className="p-3">Findings Count</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -158,9 +212,23 @@ export default function AccountsPage() {
                         <AccountTableRow
                           key={acc.account_id}
                           acc={acc}
-                          selected={selected.has(acc.account_id)}
-                          onToggle={() => toggle(acc.account_id)}
-                          onEmail={() => openEmail([acc.account_id])}
+                          tab={tab}
+                          status={
+                            accountStatus[acc.account_id] || {
+                              inspectorStatus: "not_fetched",
+                              inspectorCount: null,
+                              cspmStatus: "not_fetched",
+                              cspmCount: null,
+                            }
+                          }
+                          onFetchInspector={() => inspectorMutation.mutate(acc.account_id)}
+                          onFetchCspm={() => cspmMutation.mutate(acc.account_id)}
+                          onEmail={() => {
+                            setEmailAccounts([acc.account_id]);
+                            setEmailOpen(true);
+                          }}
+                          isLoadingInspector={inspectorMutation.isPending && inspectorMutation.variables === acc.account_id}
+                          isLoadingCspm={cspmMutation.isPending && cspmMutation.variables === acc.account_id}
                         />
                       ))}
                     </tbody>
@@ -229,44 +297,120 @@ export default function AccountsPage() {
 
 function AccountTableRow({
   acc,
-  selected,
-  onToggle,
+  tab,
+  status,
+  onFetchInspector,
+  onFetchCspm,
   onEmail,
+  isLoadingInspector,
+  isLoadingCspm,
 }: {
   acc: AccountRow;
-  selected: boolean;
-  onToggle: () => void;
+  tab: "inspector" | "cspm";
+  status: AccountStatus;
+  onFetchInspector: () => void;
+  onFetchCspm: () => void;
   onEmail: () => void;
+  isLoadingInspector: boolean;
+  isLoadingCspm: boolean;
 }) {
-  const scoreColor =
-    acc.cspm_score >= 80 ? "text-emerald-400" : acc.cspm_score >= 60 ? "text-yellow-400" : "text-red-400";
+  const currentStatus = tab === "inspector" ? status.inspectorStatus : status.cspmStatus;
+  const currentCount = tab === "inspector" ? status.inspectorCount : status.cspmCount;
+  const currentError = tab === "inspector" ? status.inspectorError : status.cspmError;
+  const isLoading = tab === "inspector" ? isLoadingInspector : isLoadingCspm;
+  const onFetch = tab === "inspector" ? onFetchInspector : onFetchCspm;
+
+  const statusColor =
+    currentStatus === "not_fetched"
+      ? "text-muted-foreground"
+      : currentStatus === "fetching"
+        ? "text-blue-400"
+        : currentStatus === "completed"
+          ? "text-emerald-400"
+          : "text-red-400";
+
+  const statusLabel =
+    currentStatus === "not_fetched"
+      ? "Not fetched"
+      : currentStatus === "fetching"
+        ? "Fetching..."
+        : currentStatus === "completed"
+          ? "Completed"
+          : "Failed";
 
   return (
     <tr className="border-b border-border/40 hover:bg-muted/10">
       <td className="p-3">
-        <button onClick={onToggle} className="text-muted-foreground hover:text-primary">
-          {selected ? <CheckSquare className="h-4 w-4 text-primary" /> : <Square className="h-4 w-4" />}
-        </button>
-      </td>
-      <td className="p-3">
         <p className="font-medium">{acc.account_name}</p>
         <p className="text-xs font-mono text-muted-foreground">{acc.account_id}</p>
       </td>
-      <td className="p-3 font-semibold">{acc.inspector_total}</td>
-      <td className="p-3 text-red-400 font-medium">{acc.inspector_critical}</td>
-      <td className="p-3 text-orange-400 font-medium">{acc.inspector_high}</td>
-      <td className={cn("p-3 font-bold", scoreColor)}>{acc.cspm_score}%</td>
-      <td className="p-3">{acc.cis_score}%</td>
-      <td className="p-3">{acc.nist_score}%</td>
-      <td className="p-3 text-xs">{acc.owner_email || acc.owner_name || "—"}</td>
-      <td className="p-3">
-        <button
-          onClick={onEmail}
-          className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20"
-        >
-          <Mail className="h-3 w-3" />
-          Send Email
-        </button>
+      <td className="p-3 font-mono text-xs">{acc.account_id}</td>
+      <td className="p-3 text-xs">{acc.email || "—"}</td>
+      <td className="p-3 font-semibold">{currentCount ?? "—"}</td>
+      <td className={cn("p-3 text-xs font-medium", statusColor)}>
+        <div className="flex items-center gap-2">
+          {isLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+          {statusLabel}
+          {currentError && (
+            <div className="group relative">
+              <AlertCircle className="h-3 w-3 text-red-400 cursor-help" />
+              <div className="absolute bottom-full right-0 mb-2 bg-red-900 text-red-100 text-xs px-2 py-1 rounded hidden group-hover:block whitespace-nowrap z-10">
+                {currentError}
+              </div>
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="p-3 flex gap-2">
+        {currentStatus === "not_fetched" && (
+          <button
+            onClick={onFetch}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Fetching…
+              </>
+            ) : (
+              `Fetch ${tab === "inspector" ? "Inspector" : "CSPM"}`
+            )}
+          </button>
+        )}
+        {currentStatus === "fetching" && (
+          <button disabled className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 disabled:opacity-50">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Fetching…
+          </button>
+        )}
+        {currentStatus === "completed" && (
+          <>
+            <button
+              onClick={onEmail}
+              className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/20"
+            >
+              <Mail className="h-3 w-3" />
+              Email
+            </button>
+            <button
+              onClick={onFetch}
+              className="inline-flex items-center gap-1 rounded-md bg-muted/20 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted/40"
+            >
+              <RefreshCw className="h-3 w-3" />
+              Refetch
+            </button>
+          </>
+        )}
+        {currentStatus === "failed" && (
+          <button
+            onClick={onFetch}
+            className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/20"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Retry
+          </button>
+        )}
       </td>
     </tr>
   );

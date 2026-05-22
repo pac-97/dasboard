@@ -14,6 +14,15 @@ async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  accountsList: (refresh = false) =>
+    fetchApi<AccountsListResponse>(`/findings/accounts?refresh=${refresh}`),
+  
+  fetchInspectorAccount: (accountId: string) =>
+    fetchApi<AccountFindingsResponse>(`/findings/inspector/fetch-account/${accountId}`, { method: "POST" }),
+  
+  fetchCspmAccount: (accountId: string) =>
+    fetchApi<AccountFindingsResponse>(`/findings/cspm/fetch-account/${accountId}`, { method: "POST" }),
+
   accountsLive: (refresh = false) =>
     fetchApi<AccountsLiveResponse>(`/accounts/live?refresh=${refresh}`),
   refreshAccounts: () => fetchApi<AccountsLiveResponse>("/accounts/refresh", { method: "POST" }),
@@ -57,19 +66,33 @@ export interface AccountRow {
   account_id: string;
   account_name: string;
   email?: string;
-  inspector_total: number;
-  inspector_critical: number;
-  inspector_high: number;
-  inspector_medium: number;
-  inspector_low: number;
-  cspm_score: number;
-  cis_score: number;
-  nist_score: number;
-  cspm_total_findings: number;
-  cspm_failed_controls: number;
+  inspector_total?: number;
+  inspector_critical?: number;
+  inspector_high?: number;
+  inspector_medium?: number;
+  inspector_low?: number;
+  cspm_score?: number;
+  cis_score?: number;
+  nist_score?: number;
+  cspm_total_findings?: number;
+  cspm_failed_controls?: number;
   owner_id?: number;
   owner_name?: string;
   owner_email?: string;
+}
+
+export interface AccountsListResponse {
+  fetched_at: number;
+  account_count: number;
+  accounts: AccountRow[];
+}
+
+export interface AccountFindingsResponse {
+  account_id: string;
+  account_name: string;
+  findings: InspectorFinding[] | CspmFinding[];
+  stats: Record<string, number>;
+  fetched_at: number;
 }
 
 export interface AccountsLiveResponse {
