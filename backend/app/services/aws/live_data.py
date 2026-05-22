@@ -90,12 +90,21 @@ async def fetch_account_inspector_findings(account_id: str, account_name: str | 
                 account_names=account_names
             )
         
-        inspector_findings = await asyncio.to_thread(_fetch)
+        result = await asyncio.to_thread(_fetch)
+        
+        # Handle both old format (list) and new format (tuple with coverage)
+        if isinstance(result, tuple):
+            inspector_findings, coverage_by_account = result
+            coverage = coverage_by_account.get(account_id, 0.0)
+        else:
+            inspector_findings = result
+            coverage = 0.0
         
         # Aggregate stats
         stats = _aggregate_inspector(inspector_findings).get(account_id, {
             "total": 0, "critical": 0, "high": 0, "medium": 0, "low": 0
         })
+        stats["coverage"] = coverage
         
         elapsed = time.time() - start
         logger.info("account_inspector_fetch_completed", account_id=account_id, 
@@ -138,7 +147,12 @@ async def fetch_account_cspm_findings(account_id: str, account_name: str | None 
                 account_names=account_names
             )
         
-        cspm_findings = await asyncio.to_thread(_fetch)
+        cspm_findings = await asyncio.to_thread(_fetch) if callable(_fetch) else []
+        # Handle both old format (list) and new format from async
+        if isinstance(cspm_findings, tuple):
+            cspm_findings = cspm_findings[0]
+        elif not isinstance(cspm_findings, list):
+            cspm_findings = []
         
         # Calculate stats
         stats = account_cspm_scores(cspm_findings, account_id)

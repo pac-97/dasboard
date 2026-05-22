@@ -37,18 +37,46 @@ def _list_findings_page(client, **kwargs) -> dict:
     return client.list_findings(**kwargs)
 
 
+def _get_account_coverage(client, account_id: str) -> float:
+    """Fetch Inspector coverage percentage for an account."""
+    try:
+        # Get coverage stats - Inspector v2 reports coverage via memberAccountDetails or account insights
+        response = client.batch_get_account_status(accountIds=[account_id])
+        details = response.get("accountStatuses", [])
+        if details:
+            status = details[0]
+            # Get coverage percentage if available
+            coverage = status.get("state", {}).get("ec2", {}).get("coverage", {})
+            if isinstance(coverage, dict):
+                # Try different possible field names for coverage percentage
+                for key in ["percentage", "percent", "coverage", "pct"]:
+                    if key in coverage:
+                        try:
+                            return float(coverage[key])
+                        except (ValueError, TypeError):
+                            pass
+        return 0.0
+    except Exception as e:
+        logger.debug("inspector_coverage_fetch_error", account_id=account_id, error=str(e))
+        return 0.0
+
+
 def fetch_inspector_findings(
     account_ids: list[str] | None = None,
     severities: list[str] | None = None,
     account_names: dict[str, str] | None = None,
-) -> list[dict[str, Any]]:
-    """Fetch organization-wide Inspector v2 findings (delegated admin). Uses EC2/instance AWS credentials."""
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    """
+    Fetch organization-wide Inspector v2 findings (delegated admin). 
+    Returns findings and coverage data by account.
+    """
     settings = get_settings()
     account_names = account_names or {}
     logger.info("inspector_fetch_start", region=settings.inspector_aggregation_region, max_results=settings.max_inspector_results)
     
     client = get_client("inspector2", region=settings.inspector_aggregation_region, assume_role=True)
     findings: list[dict[str, Any]] = []
+    coverage_by_account: dict[str, float] = {}
     filter_criteria: dict[str, Any] = {}
 
     if severities:
@@ -56,10 +84,19 @@ def fetch_inspector_findings(
     if account_ids:
         filter_criteria["awsAccountId"] = [{"comparison": "EQUALS", "value": a} for a in account_ids]
 
+    # Fetch coverage data if account_ids provided
+    if account_ids:
+        try:
+            for aid in account_ids:
+                coverage = _get_account_coverage(client, aid)
+                coverage_by_account[aid] = coverage
+                logger.info("inspector_account_coverage_fetched", account_id=aid, coverage_percent=coverage)
+        except Exception as e:
+            logger.warning("inspector_coverage_fetch_failed", error=str(e))
+
     next_token = None
     all_arns: list[str] = []
     page_count = 0
-    findings_outside_region = 0
 
     logger.info("inspector_list_findings_start", filter_criteria=filter_criteria, target_region=settings.inspector_aggregation_region)
     while True:
@@ -139,23 +176,15 @@ def fetch_inspector_findings(
         
         for f in detail_response.get("findingDetails", []):
             try:
-                # ENFORCE: Only include findings from configured region
-                finding_region = f.get("region") or settings.inspector_aggregation_region
-                if finding_region != settings.inspector_aggregation_region:
-                    findings_outside_region += 1
-                    logger.debug("inspector_finding_outside_configured_region", 
-                               finding_region=finding_region, 
-                               configured_region=settings.inspector_aggregation_region,
-                               finding_arn=f.get("findingArn", "")[:80])
-                    continue  # Skip findings from other regions
+                # Include findings from all regions - don't filter by region
                 normalized = _normalize_inspector_finding(f, account_names)
                 findings.append(normalized)
             except Exception as e:
                 logger.error("inspector_finding_normalization_error", error=str(e), finding_arn=f.get("findingArn", "")[:80])
     
     logger.info("inspector_findings_fetched", count=len(findings), arns=len(all_arns), max_enforced=len(arns_to_fetch), 
-               findings_outside_region_skipped=findings_outside_region, total_errors=total_failed_arns)
-    return findings
+               total_errors=total_failed_arns)
+    return findings, coverage_by_account
 
 
 def _normalize_inspector_finding(finding: dict, account_names: dict[str, str] | None = None) -> dict[str, Any]:
