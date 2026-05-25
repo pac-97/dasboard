@@ -15,8 +15,14 @@ from app.services.aws.s3_cspm_scores import get_cspm_scores_from_s3
 from app.services.email.email_templates import get_inspector_email_template, get_cspm_email_template
 from app.services.reports.inspector_cspm_reports import generate_inspector_report, generate_cspm_report
 from app.services.email.graph_client import GraphMailClient
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
+
+# Timeout for CSPM score fetching during email preview (seconds)
+CSPM_SCORES_FETCH_TIMEOUT = 10
 
 
 class ComposePreviewRequest(BaseModel):
@@ -94,8 +100,16 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
         subject = f"AWS Inspector Findings Report — {', '.join(names[:2])}" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
     
     else:  # CSPM
-        # Fetch CSPM scores from S3 (with fallback to live data)
-        scores_result = await get_cspm_scores_from_s3()
+        # Fetch CSPM scores from S3 with timeout (with fallback to live data)
+        try:
+            scores_result = await asyncio.wait_for(
+                get_cspm_scores_from_s3(),
+                timeout=CSPM_SCORES_FETCH_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.warning("cspm_scores_fetch_timeout_during_preview")
+            scores_result = {"scores": {}, "source": "none", "error": "S3 fetch timeout"}
+        
         cspm_all_scores = scores_result.get("scores", {})
         
         cspm_security_score = 0
@@ -191,8 +205,15 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             )
             scores_task = get_cspm_scores_from_s3()
             
-            # Execute both in parallel
-            cspm_results, scores_result = await asyncio.gather(cspm_findings_task, scores_task)
+            try:
+                # Execute both in parallel with timeout
+                cspm_results, scores_result = await asyncio.wait_for(
+                    asyncio.gather(cspm_findings_task, scores_task),
+                    timeout=30  # 30 second timeout for combined operations
+                )
+            except asyncio.TimeoutError:
+                logger.warning("cspm_email_send_timeout_fetching_data")
+                raise HTTPException(504, "Fetching CSPM data timed out. Please try again.")
             
             cspm_all_scores = scores_result.get("scores", {})
             cspm_security_score = 0
@@ -206,6 +227,7 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             all_findings = []
             for account_id, result in zip(payload.account_ids, cspm_results):
                 if isinstance(result, Exception):
+                    logger.warning("cspm_email_findings_fetch_error", account_id=account_id, error=str(result))
                     continue
                 if result.get("status") == "completed":
                     findings = result.get("findings", [])

@@ -1,8 +1,9 @@
 """Fetch CSPM benchmark scores from S3."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from io import StringIO
 import re
+from typing import Optional, Dict, Any
 
 import boto3
 import pandas as pd
@@ -15,6 +16,11 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# In-memory cache for S3 scores with TTL
+_scores_cache: Dict[str, Dict[str, Any]] = {}
+_cache_timestamp: Optional[datetime] = None
+_CACHE_TTL_SECONDS = 300  # Cache for 5 minutes
 
 
 async def _enrich_scores_with_live_counts(scores: dict) -> dict:
@@ -87,7 +93,7 @@ async def _enrich_scores_with_live_counts(scores: dict) -> dict:
     return scores
 
 
-async def get_cspm_scores_from_s3(month: str | None = None) -> dict:
+async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = False) -> dict:
     """
     Fetch CSPM benchmark scores from S3, with fallback to live data calculation.
     
@@ -98,14 +104,24 @@ async def get_cspm_scores_from_s3(month: str | None = None) -> dict:
     
     Args:
         month: Month in format 'May', 'June', etc. Defaults to current month.
+        skip_cache: If True, bypass cache and fetch fresh data
     
     Returns:
         {
             "scores": Dict[account_id -> {cis_score, nist_score, cis_pass, cis_fail, nist_pass, nist_fail}],
-            "source": "s3" | "live_data" | "none",
+            "source": "s3" | "live_data" | "none" | "cache",
             "error": str or None
         }
     """
+    global _scores_cache, _cache_timestamp
+    
+    # Check cache first (unless skip_cache is True)
+    if not skip_cache and _scores_cache and _cache_timestamp:
+        cache_age = datetime.now(timezone.utc) - _cache_timestamp
+        if cache_age < timedelta(seconds=_CACHE_TTL_SECONDS):
+            logger.debug("cspm_scores_using_cache", cache_age_seconds=cache_age.total_seconds())
+            return {"scores": _scores_cache, "source": "cache", "error": None}
+    
     settings = get_settings()
     s3_error = None
     
@@ -191,7 +207,7 @@ async def get_cspm_scores_from_s3(month: str | None = None) -> dict:
                 # Parse CSV and normalize to dict
                 scores = {}
                 for _, row in df.iterrows():
-                    account_id = str(_get_cell(row, ["account_id", "account", "acct", "accountid"]) or "").strip()
+                    account_id = str(_get_cell(row, ["account_id", "account", "acct", "accountid", "AccountId"]) or "").strip()
                     if not account_id:
                         continue
 
@@ -215,8 +231,23 @@ async def get_cspm_scores_from_s3(month: str | None = None) -> dict:
                 if scores:
                     logger.info("cspm_scores_successfully_fetched_from_s3", key=key, account_count=len(scores))
                     
-                    # Enrich S3 scores with pass/fail counts from live findings if missing
-                    enriched_scores = await _enrich_scores_with_live_counts(scores)
+                    # Only enrich if we're missing pass/fail counts AND have actual data to fetch
+                    has_missing_counts = any(
+                        score.get('cis_pass', 0) == 0 and score.get('cis_fail', 0) == 0 and 
+                        score.get('nist_pass', 0) == 0 and score.get('nist_fail', 0) == 0
+                        for score in scores.values()
+                    )
+                    
+                    if has_missing_counts:
+                        enriched_scores = await _enrich_scores_with_live_counts(scores)
+                    else:
+                        enriched_scores = scores
+                    
+                    # Cache the results
+                    _scores_cache.clear()
+                    _scores_cache.update(enriched_scores)
+                    global _cache_timestamp
+                    _cache_timestamp = datetime.now(timezone.utc)
                     
                     return {"scores": enriched_scores, "source": "s3", "error": None}
                 else:
@@ -281,6 +312,10 @@ async def get_cspm_scores_from_s3(month: str | None = None) -> dict:
 
         if fallback_scores:
             logger.info("cspm_scores_fallback_calculation_success", account_count=len(fallback_scores))
+            # Cache the results
+            _scores_cache.clear()
+            _scores_cache.update(fallback_scores)
+            _cache_timestamp = datetime.now(timezone.utc)
             return {"scores": fallback_scores, "source": "live_data", "error": s3_error}
         
     except Exception as e:
