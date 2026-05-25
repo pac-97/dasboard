@@ -155,11 +155,13 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
         if key:  # Only proceed if we have a valid key
             try:
                 s3 = boto3.client("s3", region_name=settings.aws_region)
+                logger.info("cspm_scores_fetching_from_s3", bucket=bucket, key=key, region=settings.aws_region)
                 response = s3.get_object(Bucket=bucket, Key=key)
                 csv_content = response["Body"].read().decode("utf-8")
                 
+                logger.debug("cspm_scores_csv_loaded", size_bytes=len(csv_content), bucket=bucket, key=key)
                 df = pd.read_csv(StringIO(csv_content))
-                logger.info("cspm_scores_loaded_from_s3", key=key, rows=len(df))
+                logger.info("cspm_scores_loaded_from_s3", key=key, rows=len(df), columns=list(df.columns))
 
                 # Normalize column names for flexible access (strip, lowercase, remove non-alphanum)
                 df.columns = [c.strip() for c in df.columns]
@@ -206,13 +208,14 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
 
                 # Parse CSV and normalize to dict
                 scores = {}
-                for _, row in df.iterrows():
+                for idx, (_, row) in enumerate(df.iterrows()):
                     account_id = str(_get_cell(row, ["account_id", "account", "acct", "accountid", "AccountId"]) or "").strip()
                     if not account_id:
+                        logger.debug("cspm_scores_skipping_row_no_account_id", row_index=idx)
                         continue
 
-                    cis_score = _to_float(_get_cell(row, ["cis_score", "cis", "cis_percent", "cis%", "cis_score_%", "cis_score_pct", "cis-score"]))
-                    nist_score = _to_float(_get_cell(row, ["nist_score", "nist", "nist_percent", "nist%", "nist_score_%", "nist_score_pct", "nist-score"]))
+                    cis_score = _to_float(_get_cell(row, ["cis_score", "cis", "cis_percent", "cis%", "cis_score_%", "cis_score_pct", "cis-score", "CIS-Score"]))
+                    nist_score = _to_float(_get_cell(row, ["nist_score", "nist", "nist_percent", "nist%", "nist_score_%", "nist_score_pct", "nist-score", "NIST-Score"]))
 
                     cis_pass = _to_int(_get_cell(row, ["cis_pass", "cis_pass_count", "cis_passes", "cis_passed"]))
                     cis_fail = _to_int(_get_cell(row, ["cis_fail", "cis_fail_count", "cis_failed"]))
@@ -227,6 +230,7 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
                         "nist_pass": nist_pass,
                         "nist_fail": nist_fail,
                     }
+                    logger.debug("cspm_scores_parsed_row", account_id=account_id, cis=cis_score, nist=nist_score)
 
                 if scores:
                     logger.info("cspm_scores_successfully_fetched_from_s3", key=key, account_count=len(scores))

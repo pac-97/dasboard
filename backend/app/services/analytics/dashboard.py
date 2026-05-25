@@ -3,9 +3,27 @@ from typing import Any
 from app.services.aws.security_hub import CIS_BENCHMARK, NIST_BENCHMARK
 
 
-def build_executive_from_snapshot(snapshot: dict) -> dict[str, Any]:
+async def build_executive_from_snapshot(snapshot: dict, cspm_scores: dict | None = None) -> dict[str, Any]:
+    """
+    Build executive overview from snapshot and optional CSPM scores from S3.
+    
+    Args:
+        snapshot: Live data snapshot from AWS
+        cspm_scores: Dict of account_id -> {cis_score, nist_score, ...} from S3
+    """
     accounts = snapshot.get("accounts", [])
     inspector_findings = snapshot.get("inspector_findings", [])
+
+    # Merge S3 CSPM scores into accounts if provided
+    if cspm_scores:
+        for account in accounts:
+            account_id = account["account_id"]
+            if account_id in cspm_scores:
+                scores = cspm_scores[account_id]
+                account["cis_score"] = scores.get("cis_score", 0)
+                account["nist_score"] = scores.get("nist_score", 0)
+                # Calculate composite CSPM score (average of CIS and NIST)
+                account["cspm_score"] = (scores.get("cis_score", 0) + scores.get("nist_score", 0)) / 2
 
     severity: dict[str, int] = {}
     for f in inspector_findings:
@@ -18,11 +36,11 @@ def build_executive_from_snapshot(snapshot: dict) -> dict[str, Any]:
 
     cis_scores = [a.get("cis_score", 0) for a in accounts if a.get("cis_score")]
     nist_scores = [a.get("nist_score", 0) for a in accounts if a.get("nist_score")]
-    cspm_scores = [a.get("cspm_score", 0) for a in accounts if a.get("cspm_score")]
+    cspm_scores_list = [a.get("cspm_score", 0) for a in accounts if a.get("cspm_score")]
 
     cis_avg = round(sum(cis_scores) / len(cis_scores), 1) if cis_scores else 0
     nist_avg = round(sum(nist_scores) / len(nist_scores), 1) if nist_scores else 0
-    compliance = round(sum(cspm_scores) / len(cspm_scores), 1) if cspm_scores else 0
+    compliance = round(sum(cspm_scores_list) / len(cspm_scores_list), 1) if cspm_scores_list else 0
 
     risky = sorted(
         [

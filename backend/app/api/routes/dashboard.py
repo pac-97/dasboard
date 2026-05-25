@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.core.logging import get_logger
 from app.schemas.dashboard import ExecutiveOverview
 from app.services.analytics.dashboard import build_executive_from_snapshot
 from app.services.aws.live_data import get_live_snapshot
 from app.services.analytics import inspector_analytics, cspm_analytics
 from app.services.aws.s3_cspm_scores import get_cspm_scores_from_s3
 
+logger = get_logger(__name__)
 router = APIRouter()
 
 
@@ -17,7 +19,16 @@ async def executive_overview(
     session: AsyncSession = Depends(get_db),
 ):
     snapshot = await get_live_snapshot(force=refresh)
-    data = build_executive_from_snapshot(snapshot)
+    
+    # Fetch CSPM scores from S3
+    try:
+        scores_result = await get_cspm_scores_from_s3()
+        cspm_scores = scores_result.get("scores", {})
+    except Exception as e:
+        logger.warning("executive_overview_cspm_scores_fetch_failed", error=str(e))
+        cspm_scores = {}
+    
+    data = await build_executive_from_snapshot(snapshot, cspm_scores=cspm_scores)
     return ExecutiveOverview(**data)
 
 
