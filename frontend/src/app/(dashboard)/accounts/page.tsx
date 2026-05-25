@@ -6,7 +6,7 @@ import { Mail, RefreshCw, Search, AlertCircle, Loader2 } from "lucide-react";
 import { Topbar } from "@/components/layout/topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmailComposeDialog } from "@/components/email/email-compose-dialog";
-import { api, AccountRow } from "@/lib/api";
+import { api, AccountRow, CspmScoresResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Types for on-demand fetching
@@ -18,6 +18,8 @@ type AccountStatus = {
   cspmStatus: FetchStatus;
   cspmCount: number | null;
   cspmError?: string;
+  cisScore?: number;
+  nistScore?: number;
 };
 
 export default function AccountsPage() {
@@ -33,6 +35,12 @@ export default function AccountsPage() {
     queryKey: ["accounts-live"],
     queryFn: () => api.accountsList(false),
     refetchOnWindowFocus: false,
+  });
+
+  const { data: cspmScores, isLoading: isLoadingCspmScores } = useQuery({
+    queryKey: ["cspm-scores"],
+    queryFn: () => api.cspmScores(),
+    enabled: tab === "cspm",
   });
 
   const { data: emailLogs } = useQuery({
@@ -202,8 +210,18 @@ export default function AccountsPage() {
                         <th className="p-3">Account Name</th>
                         <th className="p-3">Account ID</th>
                         <th className="p-3">Email</th>
-                        <th className="p-3">Findings Count</th>
-                        <th className="p-3">Status</th>
+                        {tab === "inspector" ? (
+                          <>
+                            <th className="p-3">Findings Count</th>
+                            <th className="p-3">Status</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="p-3">CIS AWS Foundations v5.0.0</th>
+                            <th className="p-3">NIST 800-53 Revision 5</th>
+                            <th className="p-3">Status</th>
+                          </>
+                        )}
                         <th className="p-3">Actions</th>
                       </tr>
                     </thead>
@@ -221,6 +239,7 @@ export default function AccountsPage() {
                               cspmCount: null,
                             }
                           }
+                          cspmScores={cspmScores || {}}
                           onFetchInspector={() => inspectorMutation.mutate(acc.account_id)}
                           onFetchCspm={() => cspmMutation.mutate(acc.account_id)}
                           onEmail={() => {
@@ -299,6 +318,7 @@ function AccountTableRow({
   acc,
   tab,
   status,
+  cspmScores,
   onFetchInspector,
   onFetchCspm,
   onEmail,
@@ -308,6 +328,7 @@ function AccountTableRow({
   acc: AccountRow;
   tab: "inspector" | "cspm";
   status: AccountStatus;
+  cspmScores: CspmScoresResponse;
   onFetchInspector: () => void;
   onFetchCspm: () => void;
   onEmail: () => void;
@@ -319,6 +340,16 @@ function AccountTableRow({
   const currentError = tab === "inspector" ? status.inspectorError : status.cspmError;
   const isLoading = tab === "inspector" ? isLoadingInspector : isLoadingCspm;
   const onFetch = tab === "inspector" ? onFetchInspector : onFetchCspm;
+
+  // Get CSPM scores for this account
+  const accountCspmScores = cspmScores[acc.account_id] || {
+    cis_score: 0,
+    nist_score: 0,
+    cis_pass: 0,
+    cis_fail: 0,
+    nist_pass: 0,
+    nist_fail: 0,
+  };
 
   const statusColor =
     currentStatus === "not_fetched"
@@ -346,21 +377,53 @@ function AccountTableRow({
       </td>
       <td className="p-3 font-mono text-xs">{acc.account_id}</td>
       <td className="p-3 text-xs">{acc.email || "—"}</td>
-      <td className="p-3 font-semibold">{currentCount ?? "—"}</td>
-      <td className={cn("p-3 text-xs font-medium", statusColor)}>
-        <div className="flex items-center gap-2">
-          {isLoading && <Loader2 className="h-3 w-3 animate-spin" />}
-          {statusLabel}
-          {currentError && (
-            <div className="group relative">
-              <AlertCircle className="h-3 w-3 text-red-400 cursor-help" />
-              <div className="absolute bottom-full right-0 mb-2 bg-red-900 text-red-100 text-xs px-2 py-1 rounded hidden group-hover:block whitespace-nowrap z-10">
-                {currentError}
-              </div>
+        <>
+          <td className="p-3 font-semibold">{currentCount ?? "—"}</td>
+          <td className={cn("p-3 text-xs font-medium", statusColor)}>
+            <div className="flex items-center gap-2">
+              {isLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+              {statusLabel}
+              {currentError && (
+                <div className="group relative">
+                  <AlertCircle className="h-3 w-3 text-red-400 cursor-help" />
+                  <div className="absolute bottom-full right-0 mb-2 bg-red-900 text-red-100 text-xs px-2 py-1 rounded hidden group-hover:block whitespace-nowrap z-10">
+                    {currentError}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </td>
+          </td>
+        </>
+      ) : (
+        <>
+          <td className="p-3">
+            <div className="flex flex-col">
+              <span className="font-semibold text-blue-400">{accountCspmScores.cis_score.toFixed(1)}%</span>
+              <span className="text-xs text-muted-foreground">({accountCspmScores.cis_pass} pass, {accountCspmScores.cis_fail} fail)</span>
+            </div>
+          </td>
+          <td className="p-3">
+            <div className="flex flex-col">
+              <span className="font-semibold text-green-400">{accountCspmScores.nist_score.toFixed(1)}%</span>
+              <span className="text-xs text-muted-foreground">({accountCspmScores.nist_pass} pass, {accountCspmScores.nist_fail} fail)</span>
+            </div>
+          </td>
+          <td className={cn("p-3 text-xs font-medium", statusColor)}>
+            <div className="flex items-center gap-2">
+              {isLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+              {statusLabel}
+              {currentError && (
+                <div className="group relative">
+                  <AlertCircle className="h-3 w-3 text-red-400 cursor-help" />
+                  <div className="absolute bottom-full right-0 mb-2 bg-red-900 text-red-100 text-xs px-2 py-1 rounded hidden group-hover:block whitespace-nowrap z-10">
+                    {currentError}
+                  </div>
+                </div>
+              )}
+            </div>
+          </td>
+        </>
+      )}
       <td className="p-3 flex gap-2">
         {currentStatus === "not_fetched" && (
           <button

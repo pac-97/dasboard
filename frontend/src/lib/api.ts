@@ -31,6 +31,10 @@ export const api = {
   inspectorSummary: (refresh = false) =>
     fetchApi<InspectorSummary>(`/dashboard/inspector/summary?refresh=${refresh}`),
   cspmSummary: (refresh = false) => fetchApi<CspmSummary>(`/dashboard/cspm/summary?refresh=${refresh}`),
+  cspmScores: (month?: string) => {
+    const q = month ? `?month=${month}` : "";
+    return fetchApi<CspmScoresResponse>(`/dashboard/cspm/scores${q}`);
+  },
 
   inspectorFindings: (params?: Record<string, string>) => {
     const q = new URLSearchParams(params).toString();
@@ -162,6 +166,17 @@ export interface CspmSummary {
   nist_compliance: number;
   top_failed_services: { service: string; count: number }[];
   account_comparison: { account_id: string; account_name: string; failed_controls: number }[];
+}
+
+export interface CspmScoresResponse {
+  [account_id: string]: {
+    cis_score: number;
+    nist_score: number;
+    cis_pass: number;
+    cis_fail: number;
+    nist_pass: number;
+    nist_fail: number;
+  };
 }
 
 export interface InspectorFinding {
