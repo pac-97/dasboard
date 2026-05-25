@@ -3,7 +3,7 @@ from typing import Any
 from app.services.aws.security_hub import CIS_BENCHMARK, NIST_BENCHMARK
 
 
-async def build_executive_from_snapshot(snapshot: dict, cspm_scores: dict | None = None) -> dict[str, Any]:
+def build_executive_from_snapshot(snapshot: dict, cspm_scores: dict | None = None) -> dict[str, Any]:
     """
     Build executive overview from snapshot and optional CSPM scores from S3.
     

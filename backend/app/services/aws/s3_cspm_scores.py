@@ -129,6 +129,8 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
     direct_url = settings.cspm_scores_s3_url
     bucket = settings.s3_findings_bucket
     
+    logger.info("cspm_scores_config", direct_url_configured=bool(direct_url), bucket_configured=bool(bucket), direct_url=direct_url if direct_url else "NOT SET")
+    
     if not direct_url and not bucket:
         s3_error = "S3 bucket and CSPM_SCORES_S3_URL not configured"
         logger.warning("s3_cspm_scores_bucket_not_configured")

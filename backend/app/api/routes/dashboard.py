@@ -28,7 +28,7 @@ async def executive_overview(
         logger.warning("executive_overview_cspm_scores_fetch_failed", error=str(e))
         cspm_scores = {}
     
-    data = await build_executive_from_snapshot(snapshot, cspm_scores=cspm_scores)
+    data = build_executive_from_snapshot(snapshot, cspm_scores=cspm_scores)
     return ExecutiveOverview(**data)
 
 
