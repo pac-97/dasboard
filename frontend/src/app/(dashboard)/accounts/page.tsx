@@ -239,7 +239,7 @@ export default function AccountsPage() {
                               cspmCount: null,
                             }
                           }
-                          cspmScores={cspmScores || {}}
+                          cspmScores={cspmScores || { scores: {}, source: "none", error: null }}
                           onFetchInspector={() => inspectorMutation.mutate(acc.account_id)}
                           onFetchCspm={() => cspmMutation.mutate(acc.account_id)}
                           onEmail={() => {
