@@ -207,15 +207,25 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                     continue
                 if result.get("status") == "completed":
                     findings = result.get("findings", [])
-                    stats = result.get("stats", {})
+                    account = next((r for r in account_rows if r.get("account_id") == account_id), {})
+                    
+                    # Use S3 scores if available, otherwise use live data scores
+                    s3_score = cspm_all_scores.get(account_id, {})
+                    cis_score = s3_score.get("cis_score", 0)
+                    nist_score = s3_score.get("nist_score", 0)
+                    cis_pass = s3_score.get("cis_pass", 0)
+                    cis_fail = s3_score.get("cis_fail", 0)
+                    nist_pass = s3_score.get("nist_pass", 0)
+                    nist_fail = s3_score.get("nist_fail", 0)
+                    
                     account_scores[account_id] = {
-                        "account_name": result.get("account_name", account_id),
-                        "cis_score": stats.get("cis_score", 0),
-                        "nist_score": stats.get("nist_score", 0),
-                        "cis_pass": sum(1 for f in findings if f.get("benchmark") == "cis-aws-foundations-benchmark" and f.get("compliance_status") == "PASSED"),
-                        "cis_fail": sum(1 for f in findings if f.get("benchmark") == "cis-aws-foundations-benchmark" and f.get("compliance_status") != "PASSED"),
-                        "nist_pass": sum(1 for f in findings if f.get("benchmark") == "nist-800-53" and f.get("compliance_status") == "PASSED"),
-                        "nist_fail": sum(1 for f in findings if f.get("benchmark") == "nist-800-53" and f.get("compliance_status") != "PASSED"),
+                        "account_name": account.get("account_name", account_id),
+                        "cis_score": cis_score,
+                        "nist_score": nist_score,
+                        "cis_pass": cis_pass,
+                        "cis_fail": cis_fail,
+                        "nist_pass": nist_pass,
+                        "nist_fail": nist_fail,
                     }
                     # Collect all findings for detailed report
                     all_findings.extend(findings)

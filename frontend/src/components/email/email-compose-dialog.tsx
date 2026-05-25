@@ -6,12 +6,13 @@ import { api, AccountRow } from "@/lib/api";
 
 interface Props {
   accountIds: string[];
+  findingType: "inspector" | "cspm";
   accounts: AccountRow[];
   onClose: () => void;
   onSent: () => void;
 }
 
-export function EmailComposeDialog({ accountIds, accounts, onClose, onSent }: Props) {
+export function EmailComposeDialog({ accountIds, findingType, accounts, onClose, onSent }: Props) {
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
@@ -25,7 +26,7 @@ export function EmailComposeDialog({ accountIds, accounts, onClose, onSent }: Pr
   useEffect(() => {
     setLoading(true);
     api
-      .composeEmailPreview(accountIds)
+      .composeEmailPreview(accountIds, findingType)
       .then((preview) => {
         setSubject(preview.subject);
         setBody(preview.body_html);
@@ -33,7 +34,7 @@ export function EmailComposeDialog({ accountIds, accounts, onClose, onSent }: Pr
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [accountIds]);
+  }, [accountIds, findingType]);
 
   const handleSend = async () => {
     setSending(true);
@@ -41,6 +42,7 @@ export function EmailComposeDialog({ accountIds, accounts, onClose, onSent }: Pr
     try {
       await api.sendEmail({
         account_ids: accountIds,
+        finding_type: findingType,
         to_emails: to.split(",").map((e) => e.trim()).filter(Boolean),
         cc_emails: cc.split(",").map((e) => e.trim()).filter(Boolean),
         subject,

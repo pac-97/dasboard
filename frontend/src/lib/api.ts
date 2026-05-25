@@ -45,10 +45,10 @@ export const api = {
     return fetchApi<CspmFinding[]>(`/findings/cspm?${q}`);
   },
 
-  composeEmailPreview: (accountIds: string[]) =>
+  composeEmailPreview: (accountIds: string[], findingType: string = "inspector") =>
     fetchApi<ComposePreview>("/email/compose-preview", {
       method: "POST",
-      body: JSON.stringify({ account_ids: accountIds }),
+      body: JSON.stringify({ account_ids: accountIds, finding_type: findingType }),
     }),
 
   sendEmail: (payload: SendEmailPayload) =>
@@ -115,6 +115,7 @@ export interface ComposePreview {
 
 export interface SendEmailPayload {
   account_ids: string[];
+  finding_type: string;
   to_emails: string[];
   cc_emails: string[];
   subject: string;

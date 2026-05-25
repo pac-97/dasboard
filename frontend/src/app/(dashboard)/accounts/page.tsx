@@ -27,6 +27,7 @@ export default function AccountsPage() {
   const [search, setSearch] = useState("");
   const [emailOpen, setEmailOpen] = useState(false);
   const [emailAccounts, setEmailAccounts] = useState<string[]>([]);
+  const [emailTab, setEmailTab] = useState<"inspector" | "cspm">("inspector");
   const [tab, setTab] = useState<"inspector" | "cspm" | "logs">("inspector");
   const [logMonth, setLogMonth] = useState("");
   const [accountStatus, setAccountStatus] = useState<Record<string, AccountStatus>>({});
@@ -244,6 +245,7 @@ export default function AccountsPage() {
                           onFetchCspm={() => cspmMutation.mutate(acc.account_id)}
                           onEmail={() => {
                             setEmailAccounts([acc.account_id]);
+                            setEmailTab(tab);
                             setEmailOpen(true);
                           }}
                           isLoadingInspector={inspectorMutation.isPending && inspectorMutation.variables === acc.account_id}
@@ -303,6 +305,7 @@ export default function AccountsPage() {
       {emailOpen && (
         <EmailComposeDialog
           accountIds={emailAccounts}
+          findingType={emailTab}
           accounts={accounts}
           onClose={() => setEmailOpen(false)}
           onSent={() => {
