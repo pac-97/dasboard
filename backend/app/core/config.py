@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # S3 findings count bucket
     s3_findings_bucket: str = ""
     s3_findings_prefix: str = "findings-count/"
+    
+    # S3 CSPM Scores (direct URL or auto-fetch by month)
+    cspm_scores_s3_url: str = ""  # Direct S3 path, e.g., s3://bucket/all-ac-security-scores/May_benchmark_scores.csv
 
     # Azure AD / Microsoft Graph
     azure_tenant_id: str = ""
