@@ -119,7 +119,7 @@ def get_inspector_email_template(account_findings: dict[str, dict]) -> str:
 </html>"""
 
 
-def get_cspm_email_template(account_scores: dict[str, dict]) -> str:
+def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score: float = 0) -> str:
     """
     Generate HTML email template for CSPM compliance scores.
     
@@ -133,6 +133,7 @@ def get_cspm_email_template(account_scores: dict[str, dict]) -> str:
             nist_pass: int,
             nist_fail: int,
         }
+        cspm_security_score: Overall CSPM security score from S3 (0-100)
     
     Returns:
         HTML email body
@@ -144,7 +145,7 @@ def get_cspm_email_template(account_scores: dict[str, dict]) -> str:
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#60A5FA;">{data.get('cis_score', 0):.1f}%</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#86EFAC;">{data.get('cis_pass', 0)}</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#FCA5A5;">{data.get('cis_fail', 0)}</td>
-            <td style="padding:12px;border:1px solid #475569;text-align:center;color:#60A5FA;">{data.get('nist_score', 0):.1f}%</td>
+            <td style="padding:12px;border:1px solid #475569;text-align:center;color:#10B981;">{data.get('nist_score', 0):.1f}%</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#86EFAC;">{data.get('nist_pass', 0)}</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#FCA5A5;">{data.get('nist_fail', 0)}</td>
         </tr>"""
@@ -153,6 +154,9 @@ def get_cspm_email_template(account_scores: dict[str, dict]) -> str:
     
     avg_cis = sum(d.get('cis_score', 0) for d in account_scores.values()) / len(account_scores) if account_scores else 0
     avg_nist = sum(d.get('nist_score', 0) for d in account_scores.values()) / len(account_scores) if account_scores else 0
+    
+    # Determine score color based on value
+    cspm_color = "#10B981" if cspm_security_score >= 70 else "#F59E0B" if cspm_security_score >= 50 else "#EF4444"
     
     return f"""<!DOCTYPE html>
 <html>
@@ -177,27 +181,51 @@ def get_cspm_email_template(account_scores: dict[str, dict]) -> str:
         .metric-box {{ padding: 12px; background-color: #1E293B; border-radius: 6px; border-left: 4px solid #34D399; }}
         .metric-label {{ color: #94A3B8; font-size: 12px; text-transform: uppercase; }}
         .metric-value {{ color: #34D399; font-size: 24px; font-weight: bold; margin-top: 4px; }}
+        .cspm-score {{ border-left-color: {cspm_color}; }}
+        .cspm-value {{ color: {cspm_color}; }}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>CSPM Compliance Report</h1>
-            <p>Benchmark Compliance Assessment</p>
+            <p>Cloud Security Posture Management Assessment</p>
         </div>
         
         <div class="section">
-            <h2>Compliance Scores</h2>
-            <p>The following table shows your compliance posture against CIS and NIST benchmarks:</p>
+            <h2>Overall Security Posture</h2>
+            <div class="metrics">
+                <div class="metric-box cspm-score">
+                    <div class="metric-label">CSPM Security Score</div>
+                    <div class="metric-value cspm-value">{cspm_security_score:.1f}/100</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">Total Accounts</div>
+                    <div class="metric-value">{len(account_scores)}</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">CIS AWS Foundations Benchmark v5.0.0</div>
+                    <div class="metric-value">{avg_cis:.1f}%</div>
+                </div>
+                <div class="metric-box">
+                    <div class="metric-label">NIST Special Publication 800-53 Revision 5</div>
+                    <div class="metric-value">{avg_nist:.1f}%</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Benchmark Compliance by Account</h2>
+            <p>The following table shows your compliance posture against CIS AWS Foundations Benchmark v5.0.0 and NIST Special Publication 800-53 Revision 5:</p>
             <table>
                 <thead>
                     <tr>
                         <th>Account Number</th>
                         <th>Account Name</th>
-                        <th style="color: #60A5FA;">CIS Score</th>
+                        <th style="color: #60A5FA;">CIS AWS v5.0.0 %</th>
                         <th style="color: #86EFAC;">CIS Pass</th>
                         <th style="color: #FCA5A5;">CIS Fail</th>
-                        <th style="color: #60A5FA;">NIST Score</th>
+                        <th style="color: #10B981;">NIST 800-53 R5 %</th>
                         <th style="color: #86EFAC;">NIST Pass</th>
                         <th style="color: #FCA5A5;">NIST Fail</th>
                     </tr>
@@ -209,43 +237,22 @@ def get_cspm_email_template(account_scores: dict[str, dict]) -> str:
         </div>
         
         <div class="section">
-            <h2>Overall Compliance Status</h2>
-            <div class="metrics">
-                <div class="metric-box">
-                    <div class="metric-label">Average CIS Score</div>
-                    <div class="metric-value">{avg_cis:.1f}%</div>
-                </div>
-                <div class="metric-box">
-                    <div class="metric-label">Average NIST Score</div>
-                    <div class="metric-value">{avg_nist:.1f}%</div>
-                </div>
-                <div class="metric-box">
-                    <div class="metric-label">Total Accounts</div>
-                    <div class="metric-value">{len(account_scores)}</div>
-                </div>
-                <div class="metric-box">
-                    <div class="metric-label">Total Failing Controls</div>
-                    <div class="metric-value">{sum(d.get('cis_fail', 0) + d.get('nist_fail', 0) for d in account_scores.values())}</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="section">
             <h2>What's Included</h2>
             <p><strong>This is a CSPM (Cloud Security Posture Management) ONLY report.</strong> All compliance findings are included in the attached XLSX file with complete details for each control.</p>
             <ul>
-                <li>Compliance scores against CIS and NIST benchmarks (above table)</li>
+                <li><strong>Overall CSPM Security Score:</strong> Organization-wide security posture metric</li>
+                <li><strong>CIS AWS Foundations Benchmark v5.0.0:</strong> Compliance percentage and pass/fail counts per account</li>
+                <li><strong>NIST Special Publication 800-53 Revision 5:</strong> Compliance percentage and pass/fail counts per account</li>
                 <li><strong>Detailed Findings Sheet:</strong> All failed and passed controls with benchmark, control ID, severity, description, and remediation details</li>
-                <li>Pass/Fail counts per benchmark per account</li>
             </ul>
         </div>
         
         <div class="section">
-            <h2>Benchmark Details</h2>
+            <h2>Benchmark Framework Details</h2>
             <ul>
-                <li><strong>CIS Benchmarks:</strong> Center for Internet Security best practices for cloud security</li>
-                <li><strong>NIST Benchmarks:</strong> National Institute of Standards & Technology compliance framework</li>
-                <li><strong>Pass/Fail:</strong> Number of passed and failed controls per benchmark</li>
+                <li><strong>CIS AWS Foundations Benchmark v5.0.0:</strong> Center for Internet Security best practices for AWS cloud security</li>
+                <li><strong>NIST Special Publication 800-53 Revision 5:</strong> National Institute of Standards & Technology Security and Privacy Controls</li>
+                <li><strong>Pass/Fail:</strong> Number of passed and failed controls per benchmark per account</li>
             </ul>
         </div>
         

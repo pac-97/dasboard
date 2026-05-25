@@ -96,6 +96,15 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
     else:  # CSPM
         # Fetch CSPM scores from S3
         cspm_scores = get_cspm_scores_from_s3()
+        
+        # Get overall CSPM security score (average of all accounts or from a dedicated score)
+        cspm_security_score = 0
+        if cspm_scores:
+            # Calculate average security score from all accounts
+            cis_scores = [score.get('cis_score', 0) for score in cspm_scores.values()]
+            nist_scores = [score.get('nist_score', 0) for score in cspm_scores.values()]
+            cspm_security_score = (sum(cis_scores + nist_scores) / (len(cis_scores + nist_scores))) if (cis_scores + nist_scores) else 0
+        
         account_scores = {aid: cspm_scores.get(aid, {
             "cis_score": 0, "nist_score": 0, "cis_pass": 0, "cis_fail": 0, "nist_pass": 0, "nist_fail": 0
         }) for aid in payload.account_ids}
@@ -105,7 +114,7 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
             account = next((r for r in account_rows if r.get("account_id") == aid), {})
             data["account_name"] = account.get("account_name", aid)
         
-        body_html = get_cspm_email_template(account_scores)
+        body_html = get_cspm_email_template(account_scores, cspm_security_score=cspm_security_score)
         subject = f"AWS CSPM Compliance Report — {', '.join(names[:2])}" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
 
     return {
@@ -181,6 +190,15 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                 return_exceptions=True
             )
             
+            # Fetch CSPM security score from S3
+            cspm_all_scores = get_cspm_scores_from_s3()
+            cspm_security_score = 0
+            if cspm_all_scores:
+                # Calculate average security score from all accounts
+                cis_scores = [score.get('cis_score', 0) for score in cspm_all_scores.values()]
+                nist_scores = [score.get('nist_score', 0) for score in cspm_all_scores.values()]
+                cspm_security_score = (sum(cis_scores + nist_scores) / (len(cis_scores + nist_scores))) if (cis_scores + nist_scores) else 0
+            
             account_scores = {}
             all_findings = []
             for account_id, result in zip(payload.account_ids, cspm_results):
@@ -204,8 +222,11 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             if not account_scores:
                 raise Exception("No CSPM findings found")
             
-            # Generate CSPM report with detailed findings
+            # Generate CSPM report with detailed findings and include CSPM security score in email body
             attachment_path = generate_cspm_report(account_scores, findings_data=all_findings)
+            
+            # Update email body to include CSPM security score
+            payload.body_html = get_cspm_email_template(account_scores, cspm_security_score=cspm_security_score)
         
         # Send email
         mail = GraphMailClient()
