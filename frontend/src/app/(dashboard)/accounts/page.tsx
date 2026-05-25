@@ -377,6 +377,7 @@ function AccountTableRow({
       </td>
       <td className="p-3 font-mono text-xs">{acc.account_id}</td>
       <td className="p-3 text-xs">{acc.email || "—"}</td>
+      {tab === "inspector" ? (
         <>
           <td className="p-3 font-semibold">{currentCount ?? "—"}</td>
           <td className={cn("p-3 text-xs font-medium", statusColor)}>
