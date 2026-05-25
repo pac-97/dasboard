@@ -357,7 +357,7 @@ function AccountTableRow({
       : currentStatus === "fetching"
         ? "text-blue-400"
         : currentStatus === "completed"
-          ? "text-emerald-400"
+    }; // Get CSPM scores for this account (may be undefined if S3 data not available)
           : "text-red-400";
 
   const statusLabel =
@@ -405,18 +405,26 @@ function AccountTableRow({
           </td>
           <td className="p-3">
             <div className="flex flex-col">
-              <span className="font-semibold text-green-400">{accountCspmScores.nist_score.toFixed(1)}%</span>
-              <span className="text-xs text-muted-foreground">({accountCspmScores.nist_pass} pass, {accountCspmScores.nist_fail} fail)</span>
-            </div>
-          </td>
-          <td className={cn("p-3 text-xs font-medium", statusColor)}>
-            <div className="flex items-center gap-2">
-              {isLoading && <Loader2 className="h-3 w-3 animate-spin" />}
-              {statusLabel}
-              {currentError && (
-                <div className="group relative">
-                  <AlertCircle className="h-3 w-3 text-red-400 cursor-help" />
-                  <div className="absolute bottom-full right-0 mb-2 bg-red-900 text-red-100 text-xs px-2 py-1 rounded hidden group-hover:block whitespace-nowrap z-10">
+              <td className="p-3">
+                {accountCspmScores ? (
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-blue-400">{accountCspmScores.cis_score.toFixed(1)}%</span>
+                    <span className="text-xs text-muted-foreground">({accountCspmScores.cis_pass} pass, {accountCspmScores.cis_fail} fail)</span>
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground">—</div>
+                )}
+              </td>
+              <td className="p-3">
+                {accountCspmScores ? (
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-green-400">{accountCspmScores.nist_score.toFixed(1)}%</span>
+                    <span className="text-xs text-muted-foreground">({accountCspmScores.nist_pass} pass, {accountCspmScores.nist_fail} fail)</span>
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground">—</div>
+                )}
+              </td>
                     {currentError}
                   </div>
                 </div>
