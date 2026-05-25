@@ -94,18 +94,18 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
         subject = f"AWS Inspector Findings Report — {', '.join(names[:2])}" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
     
     else:  # CSPM
-        # Fetch CSPM scores from S3
-        cspm_scores = get_cspm_scores_from_s3()
+        # Fetch CSPM scores from S3 (with fallback to live data)
+        scores_result = await get_cspm_scores_from_s3()
+        cspm_all_scores = scores_result.get("scores", {})
         
-        # Get overall CSPM security score (average of all accounts or from a dedicated score)
         cspm_security_score = 0
-        if cspm_scores:
+        if cspm_all_scores:
             # Calculate average security score from all accounts
-            cis_scores = [score.get('cis_score', 0) for score in cspm_scores.values()]
-            nist_scores = [score.get('nist_score', 0) for score in cspm_scores.values()]
+            cis_scores = [score.get('cis_score', 0) for score in cspm_all_scores.values()]
+            nist_scores = [score.get('nist_score', 0) for score in cspm_all_scores.values()]
             cspm_security_score = (sum(cis_scores + nist_scores) / (len(cis_scores + nist_scores))) if (cis_scores + nist_scores) else 0
         
-        account_scores = {aid: cspm_scores.get(aid, {
+        account_scores = {aid: cspm_all_scores.get(aid, {
             "cis_score": 0, "nist_score": 0, "cis_pass": 0, "cis_fail": 0, "nist_pass": 0, "nist_fail": 0
         }) for aid in payload.account_ids}
         
@@ -190,8 +190,9 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                 return_exceptions=True
             )
             
-            # Fetch CSPM security score from S3
-            cspm_all_scores = get_cspm_scores_from_s3()
+            # Fetch CSPM security score from S3 (with fallback to live data)
+            scores_result = await get_cspm_scores_from_s3()
+            cspm_all_scores = scores_result.get("scores", {})
             cspm_security_score = 0
             if cspm_all_scores:
                 # Calculate average security score from all accounts

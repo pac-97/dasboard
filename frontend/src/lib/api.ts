@@ -169,14 +169,18 @@ export interface CspmSummary {
 }
 
 export interface CspmScoresResponse {
-  [account_id: string]: {
-    cis_score: number;
-    nist_score: number;
-    cis_pass: number;
-    cis_fail: number;
-    nist_pass: number;
-    nist_fail: number;
+  scores: {
+    [account_id: string]: {
+      cis_score: number;
+      nist_score: number;
+      cis_pass: number;
+      cis_fail: number;
+      nist_pass: number;
+      nist_fail: number;
+    };
   };
+  source: "s3" | "live_data" | "none";
+  error: string | null;
 }
 
 export interface InspectorFinding {

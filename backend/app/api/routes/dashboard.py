@@ -39,5 +39,23 @@ async def cspm_scores(month: str | None = Query(None)):
     Fetch CSPM security scores from S3 for all accounts.
     
     Returns scores for CIS AWS Foundations Benchmark v5.0.0 and NIST Special Publication 800-53 Revision 5
+    Falls back to calculating scores from live findings if S3 data is unavailable.
+    
+    Response format:
+    {
+        "scores": { "account_id": { "cis_score": float, "nist_score": float, ... }, ... },
+        "source": "s3" | "live_data" | "none",
+        "error": str or null
+    }
     """
-    return get_cspm_scores_from_s3(month=month)
+    result = await get_cspm_scores_from_s3(month=month)
+    
+    # If source is "none", return structured error response
+    if result.get("source") == "none":
+        return {
+            "scores": {},
+            "source": "none",
+            "error": result.get("error", "Unable to fetch CSPM scores")
+        }
+    
+    return result

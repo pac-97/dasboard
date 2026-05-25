@@ -342,7 +342,7 @@ function AccountTableRow({
   const onFetch = tab === "inspector" ? onFetchInspector : onFetchCspm;
 
   // Get CSPM scores for this account
-  const accountCspmScores = cspmScores[acc.account_id] || {
+  const accountCspmScores = cspmScores?.scores?.[acc.account_id] || {
     cis_score: 0,
     nist_score: 0,
     cis_pass: 0,
