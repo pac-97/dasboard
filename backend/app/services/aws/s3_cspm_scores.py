@@ -246,7 +246,6 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
                     # Cache the results
                     _scores_cache.clear()
                     _scores_cache.update(enriched_scores)
-                    global _cache_timestamp
                     _cache_timestamp = datetime.now(timezone.utc)
                     
                     return {"scores": enriched_scores, "source": "s3", "error": None}
