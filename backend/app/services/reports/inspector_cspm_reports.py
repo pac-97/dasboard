@@ -261,9 +261,13 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
     # Summary worksheet
     summary_sheet = workbook.add_worksheet("Summary")
     
-    # Detailed findings worksheet if data provided
+    # Detailed findings worksheets if data provided
     if findings_data:
-        findings_sheet = workbook.add_worksheet("All Findings")
+        all_findings_sheet = workbook.add_worksheet("All Findings")
+        failed_findings_sheet = workbook.add_worksheet("Failed Controls")
+    else:
+        all_findings_sheet = None
+        failed_findings_sheet = None
     
     # Define formats
     header_format = workbook.add_format({
@@ -368,25 +372,30 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
             "Region",
             "Remediation URL"
         ]
-        for col, header in enumerate(finding_headers):
-            findings_sheet.write(0, col, header, header_format)
         
-        # Set column widths for findings
-        findings_sheet.set_column(0, 0, 16)  # Account Number
-        findings_sheet.set_column(1, 1, 25)  # Account Name
-        findings_sheet.set_column(2, 2, 18)  # Benchmark
-        findings_sheet.set_column(3, 3, 20)  # Control ID
-        findings_sheet.set_column(4, 4, 18)  # Compliance Status
-        findings_sheet.set_column(5, 5, 14)  # Severity
-        findings_sheet.set_column(6, 6, 30)  # Title
-        findings_sheet.set_column(7, 7, 40)  # Description
-        findings_sheet.set_column(8, 8, 18)  # Resource Type
-        findings_sheet.set_column(9, 9, 30)  # Resource ID
-        findings_sheet.set_column(10, 10, 12)  # Region
-        findings_sheet.set_column(11, 11, 40)  # Remediation URL
+        # Write headers to both sheets
+        for col, header in enumerate(finding_headers):
+            all_findings_sheet.write(0, col, header, header_format)
+            failed_findings_sheet.write(0, col, header, header_format)
+        
+        # Set column widths for both sheets
+        for sheet in [all_findings_sheet, failed_findings_sheet]:
+            sheet.set_column(0, 0, 16)  # Account Number
+            sheet.set_column(1, 1, 25)  # Account Name
+            sheet.set_column(2, 2, 18)  # Benchmark
+            sheet.set_column(3, 3, 20)  # Control ID
+            sheet.set_column(4, 4, 18)  # Compliance Status
+            sheet.set_column(5, 5, 14)  # Severity
+            sheet.set_column(6, 6, 30)  # Title
+            sheet.set_column(7, 7, 40)  # Description
+            sheet.set_column(8, 8, 18)  # Resource Type
+            sheet.set_column(9, 9, 30)  # Resource ID
+            sheet.set_column(10, 10, 12)  # Region
+            sheet.set_column(11, 11, 40)  # Remediation URL
         
         # Write findings data
-        f_row = 1
+        all_row = 1
+        failed_row = 1
         for finding in sorted(findings_data, key=lambda x: (x.get("account_id", ""), x.get("benchmark", ""), x.get("compliance_status", ""))):
             compliance_status = finding.get("compliance_status", "FAILED").upper()
             
@@ -396,19 +405,36 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
             else:
                 comp_format = failed_format
             
-            findings_sheet.write(f_row, 0, finding.get("account_id", ""), data_format)
-            findings_sheet.write(f_row, 1, finding.get("account_name", ""), data_format)
-            findings_sheet.write(f_row, 2, finding.get("benchmark", ""), data_format)
-            findings_sheet.write(f_row, 3, finding.get("control_id", ""), data_format)
-            findings_sheet.write(f_row, 4, compliance_status, comp_format)
-            findings_sheet.write(f_row, 5, finding.get("severity", ""), data_format)
-            findings_sheet.write(f_row, 6, finding.get("title", ""), text_format)
-            findings_sheet.write(f_row, 7, finding.get("description", ""), text_format)
-            findings_sheet.write(f_row, 8, finding.get("resource_type", ""), data_format)
-            findings_sheet.write(f_row, 9, finding.get("resource_id", ""), data_format)
-            findings_sheet.write(f_row, 10, finding.get("region", ""), data_format)
-            findings_sheet.write(f_row, 11, finding.get("remediation_url", ""), data_format)
-            f_row += 1
+            # Write to All Findings sheet
+            all_findings_sheet.write(all_row, 0, finding.get("account_id", ""), data_format)
+            all_findings_sheet.write(all_row, 1, finding.get("account_name", ""), data_format)
+            all_findings_sheet.write(all_row, 2, finding.get("benchmark", ""), data_format)
+            all_findings_sheet.write(all_row, 3, finding.get("control_id", ""), data_format)
+            all_findings_sheet.write(all_row, 4, compliance_status, comp_format)
+            all_findings_sheet.write(all_row, 5, finding.get("severity", ""), data_format)
+            all_findings_sheet.write(all_row, 6, finding.get("title", ""), text_format)
+            all_findings_sheet.write(all_row, 7, finding.get("description", ""), text_format)
+            all_findings_sheet.write(all_row, 8, finding.get("resource_type", ""), data_format)
+            all_findings_sheet.write(all_row, 9, finding.get("resource_id", ""), data_format)
+            all_findings_sheet.write(all_row, 10, finding.get("region", ""), data_format)
+            all_findings_sheet.write(all_row, 11, finding.get("remediation_url", ""), data_format)
+            all_row += 1
+            
+            # Write to Failed Controls sheet (only if failed)
+            if compliance_status == "FAILED":
+                failed_findings_sheet.write(failed_row, 0, finding.get("account_id", ""), data_format)
+                failed_findings_sheet.write(failed_row, 1, finding.get("account_name", ""), data_format)
+                failed_findings_sheet.write(failed_row, 2, finding.get("benchmark", ""), data_format)
+                failed_findings_sheet.write(failed_row, 3, finding.get("control_id", ""), data_format)
+                failed_findings_sheet.write(failed_row, 4, compliance_status, comp_format)
+                failed_findings_sheet.write(failed_row, 5, finding.get("severity", ""), data_format)
+                failed_findings_sheet.write(failed_row, 6, finding.get("title", ""), text_format)
+                failed_findings_sheet.write(failed_row, 7, finding.get("description", ""), text_format)
+                failed_findings_sheet.write(failed_row, 8, finding.get("resource_type", ""), data_format)
+                failed_findings_sheet.write(failed_row, 9, finding.get("resource_id", ""), data_format)
+                failed_findings_sheet.write(failed_row, 10, finding.get("region", ""), data_format)
+                failed_findings_sheet.write(failed_row, 11, finding.get("remediation_url", ""), data_format)
+                failed_row += 1
     
     workbook.close()
     logger.info("cspm_report_generated", path=filename, accounts=len(account_scores))

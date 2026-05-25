@@ -183,15 +183,17 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             attachment_path = generate_inspector_report(account_findings, findings_data=all_findings)
         
         else:  # CSPM
-            # Fetch CSPM findings for detailed report
-            cspm_results = await asyncio.gather(
+            # Fetch CSPM findings and scores in parallel (not sequential)
+            cspm_findings_task = asyncio.gather(
                 *[fetch_account_cspm_findings(aid, r.get("account_name")) 
                   for aid, r in zip(payload.account_ids, account_rows)],
                 return_exceptions=True
             )
+            scores_task = get_cspm_scores_from_s3()
             
-            # Fetch CSPM security score from S3 (with fallback to live data)
-            scores_result = await get_cspm_scores_from_s3()
+            # Execute both in parallel
+            cspm_results, scores_result = await asyncio.gather(cspm_findings_task, scores_task)
+            
             cspm_all_scores = scores_result.get("scores", {})
             cspm_security_score = 0
             if cspm_all_scores:

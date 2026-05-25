@@ -17,6 +17,76 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+async def _enrich_scores_with_live_counts(scores: dict) -> dict:
+    """
+    Enrich S3 scores with pass/fail counts from live findings if missing.
+    
+    If S3 scores don't have pass/fail counts (or they're zero), fetch from live findings.
+    """
+    # Check if any account has zero counts (needs enrichment)
+    needs_enrichment = any(
+        score.get('cis_pass', 0) == 0 and score.get('cis_fail', 0) == 0 and 
+        score.get('nist_pass', 0) == 0 and score.get('nist_fail', 0) == 0
+        for score in scores.values()
+    )
+    
+    if not needs_enrichment:
+        return scores
+    
+    logger.info("cspm_scores_enriching_with_live_counts", account_count=len(scores))
+    
+    try:
+        snapshot = await get_live_snapshot()
+        accounts = snapshot.get("accounts", [])
+        
+        for account in accounts:
+            account_id = account["account_id"]
+            if account_id not in scores:
+                continue
+            
+            # If this account's scores already have pass/fail counts, skip
+            if scores[account_id].get('cis_pass', 0) > 0 or scores[account_id].get('cis_fail', 0) > 0:
+                continue
+            
+            account_name = account["account_name"]
+            result = await fetch_account_cspm_findings(account_id, account_name)
+            
+            if result.get("status") == "completed" and result.get("findings"):
+                findings = result["findings"]
+                
+                cis_compliant = 0
+                cis_total = 0
+                nist_compliant = 0
+                nist_total = 0
+                
+                for finding in findings:
+                    benchmark = finding.get("benchmark", "").lower()
+                    status = finding.get("compliance_status", "").upper()
+                    
+                    if "cis-aws-foundations-benchmark" in benchmark:
+                        cis_total += 1
+                        if status == "PASSED":
+                            cis_compliant += 1
+                    elif "nist-800-53" in benchmark:
+                        nist_total += 1
+                        if status == "PASSED":
+                            nist_compliant += 1
+                
+                # Update scores with live counts
+                scores[account_id]["cis_pass"] = cis_compliant
+                scores[account_id]["cis_fail"] = cis_total - cis_compliant
+                scores[account_id]["nist_pass"] = nist_compliant
+                scores[account_id]["nist_fail"] = nist_total - nist_compliant
+                
+                logger.debug("cspm_scores_enriched_account", account_id=account_id, 
+                           cis_total=cis_total, nist_total=nist_total)
+    
+    except Exception as e:
+        logger.warning("cspm_scores_enrichment_failed", error=str(e))
+    
+    return scores
+
+
 async def get_cspm_scores_from_s3(month: str | None = None) -> dict:
     """
     Fetch CSPM benchmark scores from S3, with fallback to live data calculation.
@@ -144,7 +214,11 @@ async def get_cspm_scores_from_s3(month: str | None = None) -> dict:
 
                 if scores:
                     logger.info("cspm_scores_successfully_fetched_from_s3", key=key, account_count=len(scores))
-                    return {"scores": scores, "source": "s3", "error": None}
+                    
+                    # Enrich S3 scores with pass/fail counts from live findings if missing
+                    enriched_scores = await _enrich_scores_with_live_counts(scores)
+                    
+                    return {"scores": enriched_scores, "source": "s3", "error": None}
                 else:
                     s3_error = "No valid account records parsed from S3 CSV"
                     logger.warning("cspm_scores_empty_after_parse", key=key)
