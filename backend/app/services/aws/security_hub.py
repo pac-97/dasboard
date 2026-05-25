@@ -37,10 +37,38 @@ def _get_findings_page(client, **kwargs) -> dict:
 
 
 def _detect_benchmark(finding: dict) -> str | None:
-    """Detect benchmark from structured Compliance.Standards array (preferred) or fallback to string matching."""
-    compliance = finding.get("Compliance", {}) or {}
+    """
+    Detect benchmark from Security Hub finding using multiple strategies:
     
-    # First check structured Standards array (most reliable)
+    Priority:
+    1. GeneratorId (e.g., 'cis-aws-foundations-benchmark/v/5.0.0/5.3')
+    2. Compliance.AssociatedStandards[].StandardsId
+    3. Compliance.Standards array (legacy)
+    4. Last resort: string matching in entire finding
+    
+    Returns: 'cis', 'nist', or None
+    """
+    
+    # Strategy 1: Check GeneratorId
+    generator_id = finding.get("GeneratorId", "") or ""
+    generator_id_lower = str(generator_id).lower()
+    if "cis-aws-foundations-benchmark" in generator_id_lower:
+        return CIS_BENCHMARK
+    if "nist" in generator_id_lower or "800-53" in generator_id_lower:
+        return NIST_BENCHMARK
+    
+    # Strategy 2: Check Compliance.AssociatedStandards
+    compliance = finding.get("Compliance", {}) or {}
+    associated_standards = compliance.get("AssociatedStandards", []) or []
+    for standard in associated_standards:
+        standards_id = standard.get("StandardsId", "") or ""
+        standards_id_lower = str(standards_id).lower()
+        if "cis-aws-foundations-benchmark" in standards_id_lower:
+            return CIS_BENCHMARK
+        if "nist" in standards_id_lower or "800-53" in standards_id_lower:
+            return NIST_BENCHMARK
+    
+    # Strategy 3: Check structured Standards array (legacy - kept for backward compatibility)
     standards = compliance.get("Standards", []) or []
     for standard in standards:
         standard_name = standard.get("StandardsControlArn", "") or standard.get("Name", "")
@@ -50,7 +78,7 @@ def _detect_benchmark(finding: dict) -> str | None:
         if "nist" in standard_name_lower or "800-53" in standard_name_lower:
             return NIST_BENCHMARK
     
-    # Fallback to structured RelatedRequirements
+    # Strategy 4: Fallback to structured RelatedRequirements
     for req in compliance.get("RelatedRequirements", []) or []:
         req_lower = str(req).lower()
         if "cis" in req_lower and "aws" in req_lower:
@@ -58,7 +86,7 @@ def _detect_benchmark(finding: dict) -> str | None:
         if "nist" in req_lower or "800-53" in req_lower:
             return NIST_BENCHMARK
     
-    # Last resort: string matching in entire finding
+    # Strategy 5: Last resort: string matching in entire finding
     text = json.dumps(finding).lower()
     if "cis" in text and "aws" in text and "foundations" in text:
         return CIS_BENCHMARK
