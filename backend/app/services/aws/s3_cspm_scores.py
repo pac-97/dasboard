@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from io import StringIO
+import re
 
 import boto3
 import pandas as pd
@@ -42,24 +43,79 @@ def get_cspm_scores_from_s3(month: str | None = None) -> dict[str, dict]:
         
         df = pd.read_csv(StringIO(csv_content))
         logger.info("cspm_scores_loaded_from_s3", month=month, rows=len(df))
-        
+
+        # Normalize column names for flexible access (strip, lowercase, remove non-alphanum)
+        df.columns = [c.strip() for c in df.columns]
+        def _norm_col_name(s: str) -> str:
+            return re.sub(r"[^a-z0-9]", "", s.lower() if isinstance(s, str) else "")
+
+        norm_cols = {_norm_col_name(c): c for c in df.columns}
+
+        def _get_cell(r, candidates, default=None):
+            for key in candidates:
+                nk = _norm_col_name(key)
+                if nk in norm_cols:
+                    val = r.get(norm_cols[nk], default)
+                    if pd.isna(val):
+                        return default
+                    return val
+            return default
+
+        def _to_float(v):
+            try:
+                if v is None:
+                    return 0.0
+                if isinstance(v, str):
+                    v = v.strip()
+                    if v.endswith('%'):
+                        v = v[:-1]
+                    if v == '':
+                        return 0.0
+                return float(v)
+            except Exception:
+                return 0.0
+
+        def _to_int(v):
+            try:
+                if v is None:
+                    return 0
+                if isinstance(v, str):
+                    v = v.strip()
+                    if v == '':
+                        return 0
+                return int(float(v))
+            except Exception:
+                return 0
+
         # Parse CSV and normalize to dict
-        # Expected columns: account_id, cis_score, nist_score, cis_pass, cis_fail, nist_pass, nist_fail
+        # Be flexible with header names: account_id / Account, cis_score / CIS, nist_score / NIST, etc.
         scores = {}
         for _, row in df.iterrows():
-            account_id = str(row.get("account_id", row.get("Account", ""))).strip()
+            account_id = str(_get_cell(row, ["account_id", "account", "acct"]) or "").strip()
             if not account_id:
+                # try alternative columns
                 continue
-            
+
+            cis_score = _to_float(_get_cell(row, ["cis_score", "cis", "cis_percent", "cis%", "cis_score_%", "cis_score_pct"]))
+            nist_score = _to_float(_get_cell(row, ["nist_score", "nist", "nist_percent", "nist%", "nist_score_%", "nist_score_pct"]))
+
+            cis_pass = _to_int(_get_cell(row, ["cis_pass", "cis_pass_count", "cis_passes", "cis_passed"]))
+            cis_fail = _to_int(_get_cell(row, ["cis_fail", "cis_fail_count", "cis_failed"]))
+            nist_pass = _to_int(_get_cell(row, ["nist_pass", "nist_pass_count", "nist_passed"]))
+            nist_fail = _to_int(_get_cell(row, ["nist_fail", "nist_fail_count", "nist_failed"]))
+
             scores[account_id] = {
-                "cis_score": float(row.get("cis_score", row.get("CIS", 0)) or 0),
-                "nist_score": float(row.get("nist_score", row.get("NIST", 0)) or 0),
-                "cis_pass": int(row.get("cis_pass", row.get("CIS_PASS", 0)) or 0),
-                "cis_fail": int(row.get("cis_fail", row.get("CIS_FAIL", 0)) or 0),
-                "nist_pass": int(row.get("nist_pass", row.get("NIST_PASS", 0)) or 0),
-                "nist_fail": int(row.get("nist_fail", row.get("NIST_FAIL", 0)) or 0),
+                "cis_score": cis_score,
+                "nist_score": nist_score,
+                "cis_pass": cis_pass,
+                "cis_fail": cis_fail,
+                "nist_pass": nist_pass,
+                "nist_fail": nist_fail,
             }
-        
+
+        if not scores:
+            logger.warning("cspm_scores_empty_after_parse", month=month)
+
         return scores
     except ClientError as e:
         error_code = e.response.get("Error", {}).get("Code", "")
