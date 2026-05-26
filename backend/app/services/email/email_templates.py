@@ -143,10 +143,8 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
             <td style="padding:12px;border:1px solid #475569;text-align:left;">{account_id}</td>
             <td style="padding:12px;border:1px solid #475569;text-align:left;">{data.get('account_name', account_id)}</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#60A5FA;">{data.get('cis_score', 0):.1f}%</td>
-            <td style="padding:12px;border:1px solid #475569;text-align:center;color:#86EFAC;">{data.get('cis_pass', 0)}</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#FCA5A5;">{data.get('cis_fail', 0)}</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#10B981;">{data.get('nist_score', 0):.1f}%</td>
-            <td style="padding:12px;border:1px solid #475569;text-align:center;color:#86EFAC;">{data.get('nist_pass', 0)}</td>
             <td style="padding:12px;border:1px solid #475569;text-align:center;color:#FCA5A5;">{data.get('nist_fail', 0)}</td>
         </tr>"""
         for account_id, data in sorted(account_scores.items())
@@ -194,11 +192,20 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
         
         <div class="section">
             <h2>Overall Security Posture</h2>
-            <div class="metrics">
-                <div class="metric-box cspm-score">
-                    <div class="metric-label">CSPM Security Score</div>
-                    <div class="metric-value cspm-value">{cspm_security_score:.1f}/100</div>
+            <div style="background-color: #1E293B; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+                <div style="text-align: center; margin-bottom: 16px;">
+                    <svg width="160" height="160" style="margin: 0 auto; display: block;">
+                        <circle cx="80" cy="80" r="70" fill="none" stroke="#334155" stroke-width="8"/>
+                        <circle cx="80" cy="80" r="70" fill="none" stroke="{cspm_color}" stroke-width="8" 
+                                stroke-dasharray="{cspm_security_score * 4.398:.1f} 439.8" stroke-linecap="round" 
+                                style="transform: rotate(-90deg); transform-origin: 80px 80px; transition: stroke-dasharray 0.5s;"/>
+                        <text x="80" y="75" text-anchor="middle" fill="{cspm_color}" font-size="36" font-weight="bold">{cspm_security_score:.0f}</text>
+                        <text x="80" y="95" text-anchor="middle" fill="#94A3B8" font-size="14">/100</text>
+                    </svg>
+                    <div style="color: #94A3B8; font-size: 12px; text-transform: uppercase; margin-top: 8px;">CSPM Security Score</div>
                 </div>
+            </div>
+            <div class="metrics">
                 <div class="metric-box">
                     <div class="metric-label">Total Accounts</div>
                     <div class="metric-value">{len(account_scores)}</div>
@@ -223,10 +230,8 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
                         <th>Account Number</th>
                         <th>Account Name</th>
                         <th style="color: #60A5FA;">CIS AWS v5.0.0 %</th>
-                        <th style="color: #86EFAC;">CIS Pass</th>
                         <th style="color: #FCA5A5;">CIS Fail</th>
                         <th style="color: #10B981;">NIST 800-53 R5 %</th>
-                        <th style="color: #86EFAC;">NIST Pass</th>
                         <th style="color: #FCA5A5;">NIST Fail</th>
                     </tr>
                 </thead>
