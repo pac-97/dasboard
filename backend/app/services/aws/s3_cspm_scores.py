@@ -169,7 +169,8 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
                 import asyncio
                 csv_content = await asyncio.to_thread(_fetch_s3_csv)
                 
-                df = pd.read_csv(StringIO(csv_content))
+                # Read all columns as strings first to preserve leading zeros in account IDs
+                df = pd.read_csv(StringIO(csv_content), dtype=str)
                 logger.info("cspm_scores_loaded_from_s3", key=key, rows=len(df), columns=list(df.columns))
 
                 # Normalize column names for flexible access (strip, lowercase, remove non-alphanum)
