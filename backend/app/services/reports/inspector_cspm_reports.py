@@ -339,14 +339,14 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
     
     # ===== CSPM REPORT SHEET (Summary + Actionable Findings) =====
     # Headers for summary
-    headers = ["Account Number", "Account Name", "CIS Score", "CIS Pass", "CIS Fail", "NIST Score", "NIST Pass", "NIST Fail"]
+    headers = ["Account Number", "Account Name", "CIS Score", "CIS Fail", "NIST Score", "NIST Fail"]
     for col, header in enumerate(headers):
         report_sheet.write(0, col, header, header_format)
     
     # Set column widths for summary
     report_sheet.set_column(0, 0, 16)
     report_sheet.set_column(1, 1, 25)
-    report_sheet.set_column(2, 7, 14)
+    report_sheet.set_column(2, 5, 14)
     
     # Data rows for summary
     row = 1
@@ -354,11 +354,9 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
         report_sheet.write(row, 0, account_id, data_format)
         report_sheet.write(row, 1, data.get("account_name", account_id), data_format)
         report_sheet.write(row, 2, data.get("cis_score", 0), score_format)
-        report_sheet.write(row, 3, data.get("cis_pass", 0), pass_format)
-        report_sheet.write(row, 4, data.get("cis_fail", 0), fail_format)
-        report_sheet.write(row, 5, data.get("nist_score", 0), score_format)
-        report_sheet.write(row, 6, data.get("nist_pass", 0), pass_format)
-        report_sheet.write(row, 7, data.get("nist_fail", 0), fail_format)
+        report_sheet.write(row, 3, data.get("cis_fail", 0), fail_format)
+        report_sheet.write(row, 4, data.get("nist_score", 0), score_format)
+        report_sheet.write(row, 5, data.get("nist_fail", 0), fail_format)
         row += 1
     
     # Add blank row separator
