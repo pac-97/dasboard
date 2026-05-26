@@ -244,6 +244,7 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
                   <p className="text-sm">Select accounts above and click "Load Preview for Selected Accounts" to preview the email</p>
                 </div>
               )}
+            </div>
 
             <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
               <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm hover:bg-muted">
