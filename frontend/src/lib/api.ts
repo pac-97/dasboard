@@ -120,6 +120,7 @@ export interface SendEmailPayload {
   cc_emails: string[];
   subject: string;
   body_html: string;
+  confirmed: boolean;
 }
 
 export interface EmailLogsResponse {
