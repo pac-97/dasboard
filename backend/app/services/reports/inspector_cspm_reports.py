@@ -264,13 +264,16 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
     # Summary worksheet
     summary_sheet = workbook.add_worksheet("Summary")
     
-    # Detailed findings worksheets if data provided
-    if findings_data:
+    # Detailed findings worksheets if data provided (explicitly check for non-empty list)
+    has_findings = findings_data is not None and len(findings_data) > 0
+    if has_findings:
         logger.info("generate_cspm_report_creating_findings_sheets", findings_count=len(findings_data))
         all_findings_sheet = workbook.add_worksheet("All Findings")
         failed_findings_sheet = workbook.add_worksheet("Failed Controls")
     else:
-        logger.warning("generate_cspm_report_no_findings_data_provided", findings_data=findings_data)
+        logger.warning("generate_cspm_report_no_findings_data", 
+                      findings_data_is_none=findings_data is None, 
+                      findings_data_len=len(findings_data) if findings_data else 0)
         all_findings_sheet = None
         failed_findings_sheet = None
     

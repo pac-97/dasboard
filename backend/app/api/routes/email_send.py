@@ -282,14 +282,28 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             
             account_scores = {}
             all_findings = []
+            
+            logger.info("cspm_email_send_fetched_results", 
+                       num_results=len(cspm_results), 
+                       num_account_ids=len(payload.account_ids))
+            
             for account_id, result in zip(payload.account_ids, cspm_results):
-                logger.info("cspm_email_send_processing_result", account_id=account_id, result_status=result.get("status") if not isinstance(result, Exception) else "exception")
+                logger.info("cspm_email_send_processing_result", account_id=account_id, result_type=type(result).__name__)
+                
                 if isinstance(result, Exception):
-                    logger.warning("cspm_email_findings_fetch_error", account_id=account_id, error=str(result))
+                    logger.warning("cspm_email_findings_fetch_error", account_id=account_id, error=str(result), error_type=type(result).__name__)
                     continue
+                
+                result_status = result.get("status") if isinstance(result, dict) else "not_dict"
+                logger.info("cspm_email_result_status", account_id=account_id, status=result_status)
+                
                 if result.get("status") == "completed":
                     findings = result.get("findings", [])
                     logger.info("cspm_email_found_findings_for_account", account_id=account_id, findings_count=len(findings))
+                    
+                    if findings:
+                        logger.debug("cspm_email_sample_finding", account_id=account_id, sample=findings[0] if findings else None)
+                    
                     account = next((r for r in account_rows if r.get("account_id") == account_id), {})
                     account_name = account.get("account_name", account_id)
                     
@@ -313,16 +327,20 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                     }
                     
                     # Enrich findings with account_id and account_name for XLSX report
+                    enriched_count = 0
                     for finding in findings:
                         if not finding.get("account_id"):
                             finding["account_id"] = account_id
                         if not finding.get("account_name"):
                             finding["account_name"] = account_name
+                        enriched_count += 1
                     
                     # Collect all findings for detailed report
                     all_findings.extend(findings)
+                    logger.info("cspm_email_extended_all_findings", account_id=account_id, 
+                               findings_added=enriched_count, total_findings_so_far=len(all_findings))
                 else:
-                    logger.warning("cspm_email_result_not_completed", account_id=account_id, status=result.get("status"), result=result)
+                    logger.warning("cspm_email_result_not_completed", account_id=account_id, status=result.get("status") if isinstance(result, dict) else "unknown")
             
             if not account_scores:
                 raise Exception("No CSPM findings found")
