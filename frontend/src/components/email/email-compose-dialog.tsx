@@ -13,31 +13,44 @@ interface Props {
 }
 
 export function EmailComposeDialog({ accountIds, findingType, accounts, onClose, onSent }: Props) {
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>(accountIds);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [previewFetched, setPreviewFetched] = useState(false);
   const [sending, setSending] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAccountSelector, setShowAccountSelector] = useState(true);
 
-  // Update preview when selected accounts change
-  useEffect(() => {
+  // Load preview when user has selected accounts and is ready (not on every checkbox change)
+  const loadPreview = async () => {
+    if (!selectedAccountIds.length) {
+      setError("Select at least one account");
+      return;
+    }
     setLoading(true);
-    api
-      .composeEmailPreview(selectedAccountIds, findingType)
-      .then((preview) => {
-        setSubject(preview.subject);
-        setBody(preview.body_html);
-        setTo(preview.suggested_to.join(", "));
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [selectedAccountIds, findingType]);
+    setError(null);
+    try {
+      const preview = await api.composeEmailPreview(selectedAccountIds, findingType);
+      setSubject(preview.subject);
+      setBody(preview.body_html);
+      setTo(preview.suggested_to.join(", "));
+      setPreviewFetched(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load preview");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Initialize on mount
+  useEffect(() => {
+    setSelectedAccountIds(accountIds);
+  }, [accountIds]);
 
   const handleSend = async () => {
     setSending(true);
@@ -50,6 +63,7 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
         cc_emails: cc.split(",").map((e) => e.trim()).filter(Boolean),
         subject,
         body_html: body,
+        confirmed: true,
       });
       setSuccess(true);
       setConfirmOpen(false);
@@ -104,11 +118,6 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
             <button onClick={onClose} className="mt-6 rounded-lg bg-primary px-6 py-2 text-primary-foreground">
               Close
             </button>
-          </div>
-        ) : loading ? (
-          <div className="flex items-center justify-center p-16">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="ml-3 text-muted-foreground">Loading live findings & preparing attachments…</span>
           </div>
         ) : (
           <>
@@ -170,45 +179,71 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
                 )}
               </div>
 
-              <div>
-                <label className="text-xs font-medium uppercase text-muted-foreground">To</label>
-                <input
-                  value={to}
-                  onChange={(e) => setTo(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm"
-                  placeholder="owner@company.com"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium uppercase text-muted-foreground">CC</label>
-                <input
-                  value={cc}
-                  onChange={(e) => setCc(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm"
-                  placeholder="optional@company.com"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium uppercase text-muted-foreground">Subject</label>
-                <input
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium uppercase text-muted-foreground">Email Body (HTML)</label>
-                <textarea
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  rows={10}
-                  className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm font-mono"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Attachments: consolidated XLSX report ({selectedAccountIds.length} account{selectedAccountIds.length !== 1 ? 's' : ''}) with Executive Summary, All Failed, Critical, High, and Medium findings sheets.
-              </p>
-            </div>
+              {/* Load Preview Button */}
+              {!previewFetched && selectedAccountIds.length > 0 && (
+                <button
+                  onClick={loadPreview}
+                  disabled={loading}
+                  className="w-full px-4 py-2 text-sm bg-primary/20 text-primary rounded hover:bg-primary/30 disabled:opacity-50"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="inline h-4 w-4 animate-spin mr-2" />
+                      Loading preview...
+                    </>
+                  ) : (
+                    "Load Preview for Selected Accounts"
+                  )}
+                </button>
+              )}
+
+              {/* Preview Section */}
+              {previewFetched ? (
+                <>
+                  <div>
+                    <label className="text-xs font-medium uppercase text-muted-foreground">To</label>
+                    <input
+                      value={to}
+                      onChange={(e) => setTo(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm"
+                      placeholder="owner@company.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium uppercase text-muted-foreground">CC</label>
+                    <input
+                      value={cc}
+                      onChange={(e) => setCc(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm"
+                      placeholder="optional@company.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium uppercase text-muted-foreground">Subject</label>
+                    <input
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium uppercase text-muted-foreground">Email Body (HTML)</label>
+                    <textarea
+                      value={body}
+                      onChange={(e) => setBody(e.target.value)}
+                      rows={10}
+                      className="mt-1 w-full rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm font-mono"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Attachments: consolidated XLSX report ({selectedAccountIds.length} account{selectedAccountIds.length !== 1 ? 's' : ''}) with Executive Summary, All Failed, Critical, High, and Medium findings sheets.
+                  </p>
+                </>
+              ) : (
+                <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-muted-foreground">
+                  <p className="text-sm">Select accounts above and click "Load Preview for Selected Accounts" to preview the email</p>
+                </div>
+              )}
 
             <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
               <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm hover:bg-muted">
@@ -216,7 +251,7 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
               </button>
               <button
                 onClick={() => setConfirmOpen(true)}
-                disabled={!to.trim() || sending}
+                disabled={!previewFetched || !to.trim() || sending}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
                 <Send className="h-4 w-4" />

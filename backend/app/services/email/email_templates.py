@@ -255,7 +255,7 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
             <h2>Consolidated Account Compliance</h2>
             <p><strong>This report contains consolidated CSPM findings for selected AWS accounts under the same owner.</strong> Review the detailed findings in the attached XLSX report (5 sheets: Executive Summary, All Failed, Critical, High, Medium).</p>
             <div style="background-color: #0F172A; border-radius: 8px; padding: 16px;">
-                {_generate_account_compliance_bars(account_scores)}
+                {bars_html}
             </div>
         </div>
         
