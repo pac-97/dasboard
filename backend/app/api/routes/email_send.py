@@ -335,10 +335,27 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                             finding["account_name"] = account_name
                         enriched_count += 1
                     
-                    # Collect all findings for detailed report
-                    all_findings.extend(findings)
-                    logger.info("cspm_email_extended_all_findings", account_id=account_id, 
-                               findings_added=enriched_count, total_findings_so_far=len(all_findings))
+                    logger.info("cspm_email_findings_fetched", account_id=account_id, total_findings=len(findings))
+                    
+                    # Filter to ONLY actionable findings: FAILED + (CRITICAL|HIGH|MEDIUM)
+                    allowed_status = {"FAILED", "FAIL", "NON_COMPLIANT"}
+                    allowed_severity = {"CRITICAL", "HIGH", "MEDIUM"}
+                    
+                    filtered_findings = []
+                    for finding in findings:
+                        status = (finding.get("compliance_status") or "").upper()
+                        severity = (finding.get("severity") or "").upper()
+                        
+                        if status in allowed_status and severity in allowed_severity:
+                            filtered_findings.append(finding)
+                    
+                    logger.info("cspm_email_findings_filtered", account_id=account_id, 
+                               before_filter=len(findings), after_filter=len(filtered_findings))
+                    
+                    # Collect filtered findings for detailed report
+                    all_findings.extend(filtered_findings)
+                    logger.info("cspm_email_all_findings_collected", account_id=account_id, 
+                               findings_added=len(filtered_findings), total_findings_so_far=len(all_findings))
                 else:
                     logger.warning("cspm_email_result_not_completed", account_id=account_id, status=result.get("status") if isinstance(result, dict) else "unknown")
             
