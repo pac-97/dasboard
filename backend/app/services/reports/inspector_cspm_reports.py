@@ -261,19 +261,43 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
 
     workbook = xlsxwriter.Workbook(filename)
     
-    # Summary worksheet
-    summary_sheet = workbook.add_worksheet("Summary")
+    # Single worksheet with summary and findings
+    report_sheet = workbook.add_worksheet("CSPM Report")
     
-    # Detailed findings worksheets if data provided (explicitly check for non-empty list)
+    # Calculate pass/fail counts from findings data
     has_findings = findings_data is not None and len(findings_data) > 0
     if has_findings:
-        logger.info("generate_cspm_report_creating_findings_sheets", findings_count=len(findings_data))
-        actionable_findings_sheet = workbook.add_worksheet("Actionable Findings")
-    else:
-        logger.warning("generate_cspm_report_no_findings_data", 
-                      findings_data_is_none=findings_data is None, 
-                      findings_data_len=len(findings_data) if findings_data else 0)
-        actionable_findings_sheet = None
+        # Calculate CIS and NIST pass/fail from findings
+        for account_id in account_scores:
+            cis_pass = 0
+            cis_fail = 0
+            nist_pass = 0
+            nist_fail = 0
+            
+            for finding in findings_data:
+                if finding.get("account_id") == account_id:
+                    benchmark = (finding.get("benchmark") or "").lower()
+                    status = (finding.get("compliance_status") or "").upper()
+                    
+                    if "cis" in benchmark:
+                        if status == "FAILED":
+                            cis_fail += 1
+                        elif status == "PASSED":
+                            cis_pass += 1
+                    elif "nist" in benchmark:
+                        if status == "FAILED":
+                            nist_fail += 1
+                        elif status == "PASSED":
+                            nist_pass += 1
+            
+            # Update account_scores with calculated counts
+            if cis_pass > 0 or cis_fail > 0 or nist_pass > 0 or nist_fail > 0:
+                account_scores[account_id]["cis_pass"] = cis_pass
+                account_scores[account_id]["cis_fail"] = cis_fail
+                account_scores[account_id]["nist_pass"] = nist_pass
+                account_scores[account_id]["nist_fail"] = nist_fail
+                logger.info("cspm_report_calculated_counts", account_id=account_id, 
+                           cis_pass=cis_pass, cis_fail=cis_fail, nist_pass=nist_pass, nist_fail=nist_fail)
     
     # Define formats
     header_format = workbook.add_format({
@@ -313,31 +337,34 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
         "font_color": "#FCA5A5",
     })
     
-    # ===== SUMMARY SHEET =====
+    # ===== CSPM REPORT SHEET (Summary + Actionable Findings) =====
     # Headers for summary
     headers = ["Account Number", "Account Name", "CIS Score", "CIS Pass", "CIS Fail", "NIST Score", "NIST Pass", "NIST Fail"]
     for col, header in enumerate(headers):
-        summary_sheet.write(0, col, header, header_format)
+        report_sheet.write(0, col, header, header_format)
     
     # Set column widths for summary
-    summary_sheet.set_column(0, 0, 16)
-    summary_sheet.set_column(1, 1, 25)
-    summary_sheet.set_column(2, 7, 14)
+    report_sheet.set_column(0, 0, 16)
+    report_sheet.set_column(1, 1, 25)
+    report_sheet.set_column(2, 7, 14)
     
     # Data rows for summary
     row = 1
     for account_id, data in sorted(account_scores.items()):
-        summary_sheet.write(row, 0, account_id, data_format)
-        summary_sheet.write(row, 1, data.get("account_name", account_id), data_format)
-        summary_sheet.write(row, 2, data.get("cis_score", 0), score_format)
-        summary_sheet.write(row, 3, data.get("cis_pass", 0), pass_format)
-        summary_sheet.write(row, 4, data.get("cis_fail", 0), fail_format)
-        summary_sheet.write(row, 5, data.get("nist_score", 0), score_format)
-        summary_sheet.write(row, 6, data.get("nist_pass", 0), pass_format)
-        summary_sheet.write(row, 7, data.get("nist_fail", 0), fail_format)
+        report_sheet.write(row, 0, account_id, data_format)
+        report_sheet.write(row, 1, data.get("account_name", account_id), data_format)
+        report_sheet.write(row, 2, data.get("cis_score", 0), score_format)
+        report_sheet.write(row, 3, data.get("cis_pass", 0), pass_format)
+        report_sheet.write(row, 4, data.get("cis_fail", 0), fail_format)
+        report_sheet.write(row, 5, data.get("nist_score", 0), score_format)
+        report_sheet.write(row, 6, data.get("nist_pass", 0), pass_format)
+        report_sheet.write(row, 7, data.get("nist_fail", 0), fail_format)
         row += 1
     
-    # ===== DETAILED FINDINGS SHEET =====
+    # Add blank row separator
+    findings_start_row = row + 2
+    
+    # ===== ACTIONABLE FINDINGS SECTION =====
     if findings_data:
         # Formats for compliance status
         passed_format = workbook.add_format({
@@ -378,25 +405,25 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
             "Remediation"
         ]
         
-        # Write headers to actionable findings sheet
+        # Write headers to actionable findings section
         for col, header in enumerate(finding_headers):
-            actionable_findings_sheet.write(0, col, header, header_format)
+            report_sheet.write(findings_start_row, col, header, header_format)
         
-        # Set column widths for actionable findings sheet
-        actionable_findings_sheet.set_column(0, 0, 16)  # Account ID
-        actionable_findings_sheet.set_column(1, 1, 25)  # Account Name
-        actionable_findings_sheet.set_column(2, 2, 18)  # Benchmark
-        actionable_findings_sheet.set_column(3, 3, 20)  # Control ID
-        actionable_findings_sheet.set_column(4, 4, 30)  # Control Title
-        actionable_findings_sheet.set_column(5, 5, 14)  # Status
-        actionable_findings_sheet.set_column(6, 6, 12)  # Severity
-        actionable_findings_sheet.set_column(7, 7, 12)  # Region
-        actionable_findings_sheet.set_column(8, 8, 30)  # Resource ID
-        actionable_findings_sheet.set_column(9, 9, 40)  # Description
-        actionable_findings_sheet.set_column(10, 10, 40)  # Remediation
+        # Set column widths for actionable findings section
+        report_sheet.set_column(0, 0, 16)  # Account ID
+        report_sheet.set_column(1, 1, 25)  # Account Name
+        report_sheet.set_column(2, 2, 18)  # Benchmark
+        report_sheet.set_column(3, 3, 20)  # Control ID
+        report_sheet.set_column(4, 4, 30)  # Control Title
+        report_sheet.set_column(5, 5, 14)  # Status
+        report_sheet.set_column(6, 6, 12)  # Severity
+        report_sheet.set_column(7, 7, 12)  # Region
+        report_sheet.set_column(8, 8, 30)  # Resource ID
+        report_sheet.set_column(9, 9, 40)  # Description
+        report_sheet.set_column(10, 10, 40)  # Remediation
         
         # Write findings data - all are already filtered to FAILED + CRITICAL/HIGH/MEDIUM
-        row = 1
+        row = findings_start_row + 1
         logger.info("cspm_report_writing_findings", findings_count=len(findings_data), first_finding=findings_data[0] if findings_data else None)
         for finding in sorted(findings_data, key=lambda x: (x.get("account_id", ""), x.get("benchmark", ""), x.get("control_id", ""))):
             severity = (finding.get("severity", "") or "").upper()
@@ -426,18 +453,18 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
                     "font_color": "#FED7AA",
                 })
             
-            # Write to Actionable Findings sheet
-            actionable_findings_sheet.write(row, 0, finding.get("account_id", ""), data_format)
-            actionable_findings_sheet.write(row, 1, finding.get("account_name", ""), data_format)
-            actionable_findings_sheet.write(row, 2, finding.get("benchmark", ""), data_format)
-            actionable_findings_sheet.write(row, 3, finding.get("control_id", ""), data_format)
-            actionable_findings_sheet.write(row, 4, finding.get("title", ""), text_format)
-            actionable_findings_sheet.write(row, 5, (finding.get("compliance_status", "") or "").upper(), data_format)
-            actionable_findings_sheet.write(row, 6, severity, severity_format)
-            actionable_findings_sheet.write(row, 7, finding.get("region", ""), data_format)
-            actionable_findings_sheet.write(row, 8, finding.get("resource_id", ""), data_format)
-            actionable_findings_sheet.write(row, 9, finding.get("description", ""), text_format)
-            actionable_findings_sheet.write(row, 10, finding.get("remediation_url", ""), text_format)
+            # Write to CSPM Report sheet
+            report_sheet.write(row, 0, finding.get("account_id", ""), data_format)
+            report_sheet.write(row, 1, finding.get("account_name", ""), data_format)
+            report_sheet.write(row, 2, finding.get("benchmark", ""), data_format)
+            report_sheet.write(row, 3, finding.get("control_id", ""), data_format)
+            report_sheet.write(row, 4, finding.get("title", ""), text_format)
+            report_sheet.write(row, 5, (finding.get("compliance_status", "") or "").upper(), data_format)
+            report_sheet.write(row, 6, severity, severity_format)
+            report_sheet.write(row, 7, finding.get("region", ""), data_format)
+            report_sheet.write(row, 8, finding.get("resource_id", ""), data_format)
+            report_sheet.write(row, 9, finding.get("description", ""), text_format)
+            report_sheet.write(row, 10, finding.get("remediation_url", ""), text_format)
             row += 1
     
     workbook.close()
