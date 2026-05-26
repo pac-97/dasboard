@@ -180,15 +180,23 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                     continue
                 if result.get("status") == "completed":
                     stats = result.get("stats", {})
+                    account_name = result.get("account_name", account_id)
                     account_findings[account_id] = {
-                        "account_name": result.get("account_name", account_id),
+                        "account_name": account_name,
                         "critical": stats.get("critical", 0),
                         "high": stats.get("high", 0),
                         "total": stats.get("total", 0),
                         "coverage": stats.get("coverage", 0),
                     }
+                    # Enrich findings with account_id and account_name for XLSX report
+                    findings = result.get("findings", [])
+                    for finding in findings:
+                        if not finding.get("account_id"):
+                            finding["account_id"] = account_id
+                        if not finding.get("account_name"):
+                            finding["account_name"] = account_name
                     # Collect all findings for detailed report
-                    all_findings.extend(result.get("findings", []))
+                    all_findings.extend(findings)
             
             if not account_findings:
                 raise Exception("No findings retrieved from Inspector")
@@ -232,6 +240,7 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                 if result.get("status") == "completed":
                     findings = result.get("findings", [])
                     account = next((r for r in account_rows if r.get("account_id") == account_id), {})
+                    account_name = account.get("account_name", account_id)
                     
                     # Use S3 scores if available, otherwise use live data scores
                     s3_score = cspm_all_scores.get(account_id, {})
@@ -243,7 +252,7 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                     nist_fail = s3_score.get("nist_fail", 0)
                     
                     account_scores[account_id] = {
-                        "account_name": account.get("account_name", account_id),
+                        "account_name": account_name,
                         "cis_score": cis_score,
                         "nist_score": nist_score,
                         "cis_pass": cis_pass,
@@ -251,6 +260,14 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                         "nist_pass": nist_pass,
                         "nist_fail": nist_fail,
                     }
+                    
+                    # Enrich findings with account_id and account_name for XLSX report
+                    for finding in findings:
+                        if not finding.get("account_id"):
+                            finding["account_id"] = account_id
+                        if not finding.get("account_name"):
+                            finding["account_name"] = account_name
+                    
                     # Collect all findings for detailed report
                     all_findings.extend(findings)
             
