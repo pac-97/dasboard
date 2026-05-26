@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -38,60 +39,74 @@ def _get_findings_page(client, **kwargs) -> dict:
 
 def _detect_benchmark(finding: dict) -> str | None:
     """
-    Detect benchmark from Security Hub finding using multiple strategies:
+    Detect benchmark from Security Hub finding - ONLY specific versions.
     
-    Priority:
-    1. GeneratorId (e.g., 'cis-aws-foundations-benchmark/v/5.0.0/5.3')
-    2. Compliance.AssociatedStandards[].StandardsId
-    3. Compliance.Standards array (legacy)
-    4. Last resort: string matching in entire finding
+    Matches ONLY:
+    - CIS AWS Foundations Benchmark v5.0.0 (by AWS)
+    - NIST Special Publication 800-53 Revision 5 (by AWS)
     
-    Returns: 'cis', 'nist', or None
+    Rejects:
+    - Other CIS versions
+    - Other NIST versions/revisions
+    - AWS Inspector findings (GeneratorId starts with 'inspector')
+    
+    Returns: 'cis-aws-foundations-benchmark' or 'nist-800-53', or None
     """
+    generator_id = (finding.get("GeneratorId", "") or "").lower()
     
-    # Strategy 1: Check GeneratorId
-    generator_id = finding.get("GeneratorId", "") or ""
-    generator_id_lower = str(generator_id).lower()
-    if "cis-aws-foundations-benchmark" in generator_id_lower:
-        return CIS_BENCHMARK
-    if "nist" in generator_id_lower or "800-53" in generator_id_lower:
+    # REJECT: AWS Inspector findings (not CSPM)
+    if generator_id.startswith("aws-inspector") or "inspector2" in generator_id or "inspector" in generator_id.split("/")[0]:
+        return None
+    
+    # Strategy 1: Check GeneratorId for version-specific patterns
+    # GeneratorId format: 'cis-aws-foundations-benchmark/v/5.0.0/5.3' or 'nist-800-53/ca-7'
+    if "cis-aws-foundations-benchmark" in generator_id:
+        # Only match v5.0.0 or v/5.0.0
+        if re.search(r"v/?5\.0\.0", generator_id):
+            return CIS_BENCHMARK
+        # Reject other CIS versions
+        return None
+    
+    if "nist-800-53" in generator_id:
+        # NIST in GeneratorId is typically just 'nist-800-53' without version info
+        # AWS Security Hub's NIST 800-53 compliance check uses Revision 5
         return NIST_BENCHMARK
     
-    # Strategy 2: Check Compliance.AssociatedStandards
+    # Strategy 2: Check Compliance.AssociatedStandards (more reliable)
     compliance = finding.get("Compliance", {}) or {}
     associated_standards = compliance.get("AssociatedStandards", []) or []
+    
     for standard in associated_standards:
-        standards_id = standard.get("StandardsId", "") or ""
-        standards_id_lower = str(standards_id).lower()
-        if "cis-aws-foundations-benchmark" in standards_id_lower:
-            return CIS_BENCHMARK
-        if "nist" in standards_id_lower or "800-53" in standards_id_lower:
-            return NIST_BENCHMARK
+        standard_arn = (standard.get("StandardsArn", "") or "").lower()
+        standards_id = (standard.get("StandardsId", "") or "").lower()
+        
+        # CIS: arn:aws:securityhub:region::standards/aws-foundational-security-best-practices/v/5.0.0
+        # or StandardsId: 'cis-aws-foundations-benchmark/v/5.0.0'
+        if "cis-aws-foundations-benchmark" in standards_id or ("cis" in standard_arn and "5.0.0" in standard_arn):
+            if re.search(r"5\.0\.0", standard_arn + standards_id):
+                return CIS_BENCHMARK
+        
+        # NIST: arn:aws:securityhub:region::standards/nist-800-53/v/5.0.0
+        # or StandardsId: 'nist-800-53'
+        if "nist-800-53" in standards_id or ("nist" in standard_arn and "800-53" in standard_arn):
+            # AWS Security Hub's NIST standard is always Revision 5
+            if re.search(r"5\.0\.0", standard_arn):
+                return NIST_BENCHMARK
     
-    # Strategy 3: Check structured Standards array (legacy - kept for backward compatibility)
-    standards = compliance.get("Standards", []) or []
-    for standard in standards:
-        standard_name = standard.get("StandardsControlArn", "") or standard.get("Name", "")
-        standard_name_lower = str(standard_name).lower()
-        if "cis" in standard_name_lower and "aws" in standard_name_lower:
-            return CIS_BENCHMARK
-        if "nist" in standard_name_lower or "800-53" in standard_name_lower:
-            return NIST_BENCHMARK
-    
-    # Strategy 4: Fallback to structured RelatedRequirements
+    # Strategy 3: Check RelatedRequirements (more specific than full JSON match)
     for req in compliance.get("RelatedRequirements", []) or []:
         req_lower = str(req).lower()
-        if "cis" in req_lower and "aws" in req_lower:
+        
+        # CIS: 'cis:5.0.0/5.3' or similar
+        if "cis" in req_lower and "5.0.0" in req_lower:
             return CIS_BENCHMARK
-        if "nist" in req_lower or "800-53" in req_lower:
+        
+        # NIST: 'nist:800-53r5:ca-7' or 'pci:3.2.1' etc.
+        if "nist" in req_lower and "800-53" in req_lower and "r5" in req_lower:
             return NIST_BENCHMARK
     
-    # Strategy 5: Last resort: string matching in entire finding
-    text = json.dumps(finding).lower()
-    if "cis" in text and "aws" in text and "foundations" in text:
-        return CIS_BENCHMARK
-    if "nist" in text or "800-53" in text:
-        return NIST_BENCHMARK
+    # DO NOT use permissive string matching (removed Strategy 5)
+    # This was causing false positives with Inspector findings
     
     return None
 
