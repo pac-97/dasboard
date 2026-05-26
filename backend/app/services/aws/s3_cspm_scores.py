@@ -244,24 +244,12 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
                 if scores:
                     logger.info("cspm_scores_successfully_fetched_from_s3", key=key, account_count=len(scores))
                     
-                    # Only enrich if we're missing pass/fail counts AND have actual data to fetch
-                    has_missing_counts = any(
-                        score.get('cis_pass', 0) == 0 and score.get('cis_fail', 0) == 0 and 
-                        score.get('nist_pass', 0) == 0 and score.get('nist_fail', 0) == 0
-                        for score in scores.values()
-                    )
-                    
-                    if has_missing_counts:
-                        enriched_scores = await _enrich_scores_with_live_counts(scores)
-                    else:
-                        enriched_scores = scores
-                    
-                    # Cache the results
+                    # Cache the results (no enrichment for S3 data - it's already complete)
                     _scores_cache.clear()
-                    _scores_cache.update(enriched_scores)
+                    _scores_cache.update(scores)
                     _cache_timestamp = datetime.now(timezone.utc)
                     
-                    return {"scores": enriched_scores, "source": "s3", "error": None}
+                    return {"scores": scores, "source": "s3", "error": None}
                 else:
                     s3_error = "No valid account records parsed from S3 CSV"
                     logger.warning("cspm_scores_empty_after_parse", key=key)
