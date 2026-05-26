@@ -20,15 +20,24 @@ async def executive_overview(
 ):
     snapshot = await get_live_snapshot(force=refresh)
     
-    # Fetch CSPM scores from S3
+    # Fetch CSPM scores from S3 and merge into accounts
     try:
         scores_result = await get_cspm_scores_from_s3()
         cspm_scores = scores_result.get("scores", {})
+        
+        # Merge scores into accounts before building executive overview
+        for account in snapshot.get("accounts", []):
+            account_id = account["account_id"]
+            if account_id in cspm_scores:
+                scores = cspm_scores[account_id]
+                account["cis_score"] = scores.get("cis_score", 0)
+                account["nist_score"] = scores.get("nist_score", 0)
+                # Calculate composite CSPM score (average of CIS and NIST)
+                account["cspm_score"] = (scores.get("cis_score", 0) + scores.get("nist_score", 0)) / 2
     except Exception as e:
         logger.warning("executive_overview_cspm_scores_fetch_failed", error=str(e))
-        cspm_scores = {}
     
-    data = build_executive_from_snapshot(snapshot, cspm_scores=cspm_scores)
+    data = build_executive_from_snapshot(snapshot)
     return ExecutiveOverview(**data)
 
 
