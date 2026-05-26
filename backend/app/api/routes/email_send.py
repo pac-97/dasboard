@@ -283,11 +283,13 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             account_scores = {}
             all_findings = []
             for account_id, result in zip(payload.account_ids, cspm_results):
+                logger.info("cspm_email_send_processing_result", account_id=account_id, result_status=result.get("status") if not isinstance(result, Exception) else "exception")
                 if isinstance(result, Exception):
                     logger.warning("cspm_email_findings_fetch_error", account_id=account_id, error=str(result))
                     continue
                 if result.get("status") == "completed":
                     findings = result.get("findings", [])
+                    logger.info("cspm_email_found_findings_for_account", account_id=account_id, findings_count=len(findings))
                     account = next((r for r in account_rows if r.get("account_id") == account_id), {})
                     account_name = account.get("account_name", account_id)
                     
@@ -319,6 +321,8 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
                     
                     # Collect all findings for detailed report
                     all_findings.extend(findings)
+                else:
+                    logger.warning("cspm_email_result_not_completed", account_id=account_id, status=result.get("status"), result=result)
             
             if not account_scores:
                 raise Exception("No CSPM findings found")

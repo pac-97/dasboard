@@ -248,6 +248,9 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
     Returns:
         Path to generated XLSX file
     """
+    logger.info("generate_cspm_report_start", findings_data_count=len(findings_data) if findings_data else 0, 
+                findings_data_is_none=findings_data is None, findings_data_type=type(findings_data).__name__)
+    
     settings = get_settings()
     out_dir = Path(settings.reports_output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -263,9 +266,11 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
     
     # Detailed findings worksheets if data provided
     if findings_data:
+        logger.info("generate_cspm_report_creating_findings_sheets", findings_count=len(findings_data))
         all_findings_sheet = workbook.add_worksheet("All Findings")
         failed_findings_sheet = workbook.add_worksheet("Failed Controls")
     else:
+        logger.warning("generate_cspm_report_no_findings_data_provided", findings_data=findings_data)
         all_findings_sheet = None
         failed_findings_sheet = None
     
@@ -396,6 +401,7 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
         # Write findings data
         all_row = 1
         failed_row = 1
+        logger.info("cspm_report_writing_findings", findings_count=len(findings_data), first_finding=findings_data[0] if findings_data else None)
         for finding in sorted(findings_data, key=lambda x: (x.get("account_id", ""), x.get("benchmark", ""), x.get("compliance_status", ""))):
             compliance_status = finding.get("compliance_status", "FAILED").upper()
             
@@ -437,5 +443,10 @@ def generate_cspm_report(account_scores: dict[str, dict], findings_data: list[di
                 failed_row += 1
     
     workbook.close()
-    logger.info("cspm_report_generated", path=filename, accounts=len(account_scores))
+    if findings_data:
+        logger.info("cspm_report_generated", path=filename, accounts=len(account_scores), 
+                   total_findings=all_row-1, failed_findings=failed_row-1)
+    else:
+        logger.info("cspm_report_generated", path=filename, accounts=len(account_scores), 
+                   total_findings=0, failed_findings=0)
     return filename
