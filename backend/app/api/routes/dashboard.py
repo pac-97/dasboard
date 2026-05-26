@@ -94,8 +94,8 @@ async def debug_s3_test():
         
         logger.info("debug_s3_test_start", bucket=bucket, key=key)
         
-        # Try to fetch with timeout
-        async def _fetch():
+        # Define sync function for threading (asyncio.to_thread expects sync, not async)
+        def _fetch_sync():
             s3 = boto3.client("s3", region_name=settings.aws_region)
             logger.info("debug_s3_test_fetching", bucket=bucket, key=key)
             response = s3.get_object(Bucket=bucket, Key=key)
@@ -104,7 +104,7 @@ async def debug_s3_test():
         
         # Run with 15 second timeout
         csv_content = await asyncio.wait_for(
-            asyncio.to_thread(_fetch),
+            asyncio.to_thread(_fetch_sync),
             timeout=15
         )
         
