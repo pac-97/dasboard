@@ -100,8 +100,15 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
         subject = f"AWS Inspector Findings Report — {', '.join(names[:2])}" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
     
     else:  # CSPM
-        # Fetch CSPM scores from S3 with timeout (with fallback to live data)
+        # Fetch CSPM findings and scores in parallel
+        cspm_findings_task = asyncio.gather(
+            *[fetch_account_cspm_findings(aid, r.get("account_name")) 
+              for aid, r in zip(payload.account_ids, account_rows)],
+            return_exceptions=True
+        )
+        
         try:
+            # Fetch CSPM scores from S3 with timeout
             scores_result = await asyncio.wait_for(
                 get_cspm_scores_from_s3(),
                 timeout=CSPM_SCORES_FETCH_TIMEOUT
@@ -119,14 +126,53 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
             nist_scores = [score.get('nist_score', 0) for score in cspm_all_scores.values()]
             cspm_security_score = (sum(cis_scores + nist_scores) / (len(cis_scores + nist_scores))) if (cis_scores + nist_scores) else 0
         
-        account_scores = {aid: cspm_all_scores.get(aid, {
-            "cis_score": 0, "nist_score": 0, "cis_pass": 0, "cis_fail": 0, "nist_pass": 0, "nist_fail": 0
-        }) for aid in payload.account_ids}
+        account_scores = {}
+        all_findings = []
+        cspm_results = await cspm_findings_task
         
-        # Enrich with account names
-        for aid, data in account_scores.items():
-            account = next((r for r in account_rows if r.get("account_id") == aid), {})
-            data["account_name"] = account.get("account_name", aid)
+        for account_id, result in zip(payload.account_ids, cspm_results):
+            if isinstance(result, Exception):
+                logger.warning("cspm_preview_findings_fetch_error", account_id=account_id, error=str(result))
+                continue
+            if result.get("status") == "completed":
+                findings = result.get("findings", [])
+                account = next((r for r in account_rows if r.get("account_id") == account_id), {})
+                account_name = account.get("account_name", account_id)
+                
+                s3_score = cspm_all_scores.get(account_id, {})
+                account_scores[account_id] = {
+                    "account_name": account_name,
+                    "cis_score": s3_score.get("cis_score", 0),
+                    "nist_score": s3_score.get("nist_score", 0),
+                    "cis_pass": s3_score.get("cis_pass", 0),
+                    "cis_fail": s3_score.get("cis_fail", 0),
+                    "nist_pass": s3_score.get("nist_pass", 0),
+                    "nist_fail": s3_score.get("nist_fail", 0),
+                }
+                
+                # Enrich findings with account_id and account_name
+                for finding in findings:
+                    if not finding.get("account_id"):
+                        finding["account_id"] = account_id
+                    if not finding.get("account_name"):
+                        finding["account_name"] = account_name
+                
+                all_findings.extend(findings)
+        
+        # Add account scores for any accounts without findings
+        for aid in payload.account_ids:
+            if aid not in account_scores:
+                s3_score = cspm_all_scores.get(aid, {})
+                account = next((r for r in account_rows if r.get("account_id") == aid), {})
+                account_scores[aid] = {
+                    "account_name": account.get("account_name", aid),
+                    "cis_score": s3_score.get("cis_score", 0),
+                    "nist_score": s3_score.get("nist_score", 0),
+                    "cis_pass": s3_score.get("cis_pass", 0),
+                    "cis_fail": s3_score.get("cis_fail", 0),
+                    "nist_pass": s3_score.get("nist_pass", 0),
+                    "nist_fail": s3_score.get("nist_fail", 0),
+                }
         
         body_html = get_cspm_email_template(account_scores, cspm_security_score=cspm_security_score)
         subject = f"AWS CSPM Compliance Report — {', '.join(names[:2])}" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
@@ -137,6 +183,7 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
         "suggested_to": suggested_to,
         "account_rows": account_rows,
         "finding_type": finding_type,
+        "findings_count": len(all_findings) if finding_type == "cspm" else len(all_findings),
     }
 
 
