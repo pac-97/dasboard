@@ -72,6 +72,8 @@ async def compose_preview(payload: ComposePreviewRequest, session: AsyncSession 
 
     names = [r.get("account_name", r.get("account_id")) for r in account_rows]
     suggested_to = await _resolve_owner_emails(session, payload.account_ids)
+    
+    all_findings = []  # Define outside if/else to keep scope consistent
 
     if finding_type == "inspector":
         # Parallel fetch for Inspector findings
@@ -320,6 +322,11 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             
             if not account_scores:
                 raise Exception("No CSPM findings found")
+            
+            logger.info("cspm_email_send_about_to_generate_report", 
+                       account_count=len(account_scores), 
+                       total_findings_count=len(all_findings),
+                       findings=all_findings[:3])  # Log first 3 findings for debugging
             
             # Generate CSPM report with detailed findings and include CSPM security score in email body
             attachment_path = generate_cspm_report(account_scores, findings_data=all_findings)
