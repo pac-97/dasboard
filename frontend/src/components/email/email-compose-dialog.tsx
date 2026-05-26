@@ -226,8 +226,9 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
           </>
         )}
 
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="mx-4 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+        {confirmOpen && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+            <div className="mx-4 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
                 <h3 className="text-lg font-semibold">Confirm send?</h3>
                 <p className="mt-2 text-sm text-muted-foreground">
                   Send consolidated report for <strong>{selectedAccountIds.length}</strong> account{selectedAccountIds.length !== 1 ? 's' : ''} to{" "}
