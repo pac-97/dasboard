@@ -370,7 +370,14 @@ async def send_email(payload: SendEmailRequest, session: AsyncSession = Depends(
             # Generate CSPM report with detailed findings and include CSPM security score in email body
             attachment_path = generate_cspm_report(account_scores, findings_data=all_findings)
             
-            # Update email body to include CSPM security score
+            # Count findings by severity for email template
+            findings_by_severity = {
+                "CRITICAL": len([f for f in all_findings if (f.get("severity", "") or "").upper() == "CRITICAL"]),
+                "HIGH": len([f for f in all_findings if (f.get("severity", "") or "").upper() == "HIGH"]),
+                "MEDIUM": len([f for f in all_findings if (f.get("severity", "") or "").upper() == "MEDIUM"]),
+            }
+            
+            # Update email body to include CSPM security score and findings breakdown
             payload.body_html = get_cspm_email_template(account_scores, cspm_security_score=cspm_security_score)
         
         # Send email

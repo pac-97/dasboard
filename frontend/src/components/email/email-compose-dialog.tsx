@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Send, X } from "lucide-react";
+import { Loader2, Send, X, Check } from "lucide-react";
 import { api, AccountRow } from "@/lib/api";
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
 }
 
 export function EmailComposeDialog({ accountIds, findingType, accounts, onClose, onSent }: Props) {
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>(accountIds);
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
@@ -22,11 +23,13 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAccountSelector, setShowAccountSelector] = useState(false);
 
+  // Update preview when selected accounts change
   useEffect(() => {
     setLoading(true);
     api
-      .composeEmailPreview(accountIds, findingType)
+      .composeEmailPreview(selectedAccountIds, findingType)
       .then((preview) => {
         setSubject(preview.subject);
         setBody(preview.body_html);
@@ -34,14 +37,14 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [accountIds, findingType]);
+  }, [selectedAccountIds, findingType]);
 
   const handleSend = async () => {
     setSending(true);
     setError(null);
     try {
       await api.sendEmail({
-        account_ids: accountIds,
+        account_ids: selectedAccountIds,
         finding_type: findingType,
         to_emails: to.split(",").map((e) => e.trim()).filter(Boolean),
         cc_emails: cc.split(",").map((e) => e.trim()).filter(Boolean),
@@ -59,8 +62,22 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
     }
   };
 
+  const toggleAccount = (accountId: string) => {
+    setSelectedAccountIds((prev) =>
+      prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
+    );
+  };
+
+  const selectAllAccounts = () => {
+    setSelectedAccountIds(accounts.map((a) => a.account_id));
+  };
+
+  const deselectAllAccounts = () => {
+    setSelectedAccountIds([]);
+  };
+
   const selectedNames = accounts
-    .filter((a) => accountIds.includes(a.account_id))
+    .filter((a) => selectedAccountIds.includes(a.account_id))
     .map((a) => a.account_name)
     .join(", ");
 
@@ -70,7 +87,7 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold">Send Security Report</h2>
-            <p className="text-sm text-muted-foreground truncate max-w-md">{selectedNames}</p>
+            <p className="text-sm text-muted-foreground truncate max-w-md">{selectedNames || "No accounts selected"}</p>
           </div>
           <button onClick={onClose} className="rounded-lg p-2 hover:bg-muted">
             <X className="h-5 w-5" />
@@ -83,7 +100,7 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
               <Send className="h-8 w-8 text-emerald-500" />
             </div>
             <h3 className="text-xl font-semibold text-emerald-400">Email Sent</h3>
-            <p className="mt-2 text-muted-foreground">Report and chart attached. Logged for future reference.</p>
+            <p className="mt-2 text-muted-foreground">Consolidated report attached. Logged for future reference.</p>
             <button onClick={onClose} className="mt-6 rounded-lg bg-primary px-6 py-2 text-primary-foreground">
               Close
             </button>
@@ -99,6 +116,60 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
               {error && (
                 <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">{error}</div>
               )}
+              
+              {/* Account Selection Section */}
+              <div className="border border-border rounded-lg p-4 bg-muted/20">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-xs font-medium uppercase text-muted-foreground">Select Accounts ({selectedAccountIds.length}/{accounts.length})</label>
+                  <button
+                    onClick={() => setShowAccountSelector(!showAccountSelector)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    {showAccountSelector ? "Hide" : "Show"}
+                  </button>
+                </div>
+                
+                {showAccountSelector && (
+                  <>
+                    <div className="flex gap-2 mb-3">
+                      <button
+                        onClick={selectAllAccounts}
+                        className="px-3 py-1 text-xs bg-primary/20 text-primary rounded hover:bg-primary/30"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        onClick={deselectAllAccounts}
+                        className="px-3 py-1 text-xs bg-muted text-muted-foreground rounded hover:bg-muted/80"
+                      >
+                        Deselect All
+                      </button>
+                    </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {accounts.map((account) => (
+                        <label
+                          key={account.account_id}
+                          className="flex items-center gap-2 p-2 rounded hover:bg-muted/30 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedAccountIds.includes(account.account_id)}
+                            onChange={() => toggleAccount(account.account_id)}
+                            className="w-4 h-4 rounded"
+                          />
+                          <span className="flex-1">
+                            {account.account_name} <span className="text-xs text-muted-foreground">({account.account_id})</span>
+                          </span>
+                          {selectedAccountIds.includes(account.account_id) && (
+                            <Check className="h-4 w-4 text-primary" />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+
               <div>
                 <label className="text-xs font-medium uppercase text-muted-foreground">To</label>
                 <input
@@ -135,7 +206,7 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Attachments: combined XLSX (Inspector + CSPM for {accountIds.length} account(s)) and findings chart PNG.
+                Attachments: consolidated XLSX report ({selectedAccountIds.length} account{selectedAccountIds.length !== 1 ? 's' : ''}) with Executive Summary, All Failed, Critical, High, and Medium findings sheets.
               </p>
             </div>
 
@@ -155,28 +226,27 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
           </>
         )}
 
-        {confirmOpen && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-            <div className="mx-4 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
-              <h3 className="text-lg font-semibold">Confirm send?</h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Send report for <strong>{accountIds.length}</strong> account(s) to{" "}
-                <strong>{to.split(",")[0]}</strong>
-                {accountIds.length > 1 ? " (single email with combined attachments)" : ""}?
-              </p>
-              <div className="mt-6 flex justify-end gap-3">
-                <button onClick={() => setConfirmOpen(false)} className="rounded-lg px-4 py-2 text-sm hover:bg-muted">
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSend}
-                  disabled={sending}
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground"
-                >
-                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  Confirm & Send
-                </button>
-              </div>
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+              <div className="mx-4 w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+                <h3 className="text-lg font-semibold">Confirm send?</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Send consolidated report for <strong>{selectedAccountIds.length}</strong> account{selectedAccountIds.length !== 1 ? 's' : ''} to{" "}
+                  <strong>{to.split(",")[0]}</strong>
+                  {selectedAccountIds.length > 1 ? " (single email with combined XLSX attachment)" : ""}?
+                </p>
+                <div className="mt-6 flex justify-end gap-3">
+                  <button onClick={() => setConfirmOpen(false)} className="rounded-lg px-4 py-2 text-sm hover:bg-muted">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSend}
+                    disabled={sending}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground"
+                  >
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Confirm & Send
+                  </button>
+                </div>
             </div>
           </div>
         )}

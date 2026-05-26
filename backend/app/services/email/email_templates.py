@@ -1,6 +1,7 @@
 """Email templates for Inspector and CSPM findings."""
 
 from datetime import datetime, timezone
+import math
 
 
 def get_inspector_email_template(account_findings: dict[str, dict]) -> str:
@@ -128,9 +129,7 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
             account_name: str,
             cis_score: float,
             nist_score: float,
-            cis_pass: int,
             cis_fail: int,
-            nist_pass: int,
             nist_fail: int,
         }
         cspm_security_score: Overall CSPM security score from S3 (0-100)
@@ -149,6 +148,37 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
         </tr>"""
         for account_id, data in sorted(account_scores.items())
     )
+    
+    # Generate visual compliance bars for each account
+    bars_html = ""
+    for account_id, data in sorted(account_scores.items()):
+        cis_score = data.get('cis_score', 0)
+        nist_score = data.get('nist_score', 0)
+        account_name = data.get('account_name', account_id)
+        
+        bars_html += f"""
+        <div style="margin-bottom: 20px;">
+            <div style="font-weight: 600; color: #F1F5F9; margin-bottom: 8px;">
+                {account_name} ({account_id})
+            </div>
+            <div style="margin-bottom: 12px;">
+                <div style="color: #94A3B8; font-size: 12px; margin-bottom: 4px;">CIS AWS Foundations v5.0.0: {cis_score:.1f}%</div>
+                <svg width="100%" height="20" style="max-width: 400px; display: block;">
+                    <rect x="0" y="0" width="100%" height="20" fill="#334155" rx="4"/>
+                    <rect x="0" y="0" width="{cis_score}%" height="20" fill="#60A5FA" rx="4"/>
+                    <text x="50%" y="14" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="bold">{cis_score:.0f}%</text>
+                </svg>
+            </div>
+            <div>
+                <div style="color: #94A3B8; font-size: 12px; margin-bottom: 4px;">NIST Special Publication 800-53 R5: {nist_score:.1f}%</div>
+                <svg width="100%" height="20" style="max-width: 400px; display: block;">
+                    <rect x="0" y="0" width="100%" height="20" fill="#334155" rx="4"/>
+                    <rect x="0" y="0" width="{nist_score}%" height="20" fill="#10B981" rx="4"/>
+                    <text x="50%" y="14" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="bold">{nist_score:.0f}%</text>
+                </svg>
+            </div>
+        </div>
+        """
     
     avg_cis = sum(d.get('cis_score', 0) for d in account_scores.values()) / len(account_scores) if account_scores else 0
     avg_nist = sum(d.get('nist_score', 0) for d in account_scores.values()) / len(account_scores) if account_scores else 0
@@ -222,8 +252,15 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
         </div>
         
         <div class="section">
-            <h2>Benchmark Compliance by Account</h2>
-            <p>The following table shows your compliance posture against CIS AWS Foundations Benchmark v5.0.0 and NIST Special Publication 800-53 Revision 5:</p>
+            <h2>Consolidated Account Compliance</h2>
+            <p><strong>This report contains consolidated CSPM findings for selected AWS accounts under the same owner.</strong> Review the detailed findings in the attached XLSX report (5 sheets: Executive Summary, All Failed, Critical, High, Medium).</p>
+            <div style="background-color: #0F172A; border-radius: 8px; padding: 16px;">
+                {_generate_account_compliance_bars(account_scores)}
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Benchmark Compliance Summary</h2>
             <table>
                 <thead>
                     <tr>
