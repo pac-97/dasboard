@@ -23,7 +23,7 @@ export function EmailComposeDialog({ accountIds, findingType, accounts, onClose,
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showAccountSelector, setShowAccountSelector] = useState(false);
+  const [showAccountSelector, setShowAccountSelector] = useState(true);
 
   // Update preview when selected accounts change
   useEffect(() => {
