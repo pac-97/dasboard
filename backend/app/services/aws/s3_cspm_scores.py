@@ -156,12 +156,19 @@ async def get_cspm_scores_from_s3(month: str | None = None, skip_cache: bool = F
         
         if key:  # Only proceed if we have a valid key
             try:
-                s3 = boto3.client("s3", region_name=settings.aws_region)
-                logger.info("cspm_scores_fetching_from_s3", bucket=bucket, key=key, region=settings.aws_region)
-                response = s3.get_object(Bucket=bucket, Key=key)
-                csv_content = response["Body"].read().decode("utf-8")
+                def _fetch_s3_csv():
+                    """Fetch CSV from S3 - runs in thread pool to avoid blocking"""
+                    s3 = boto3.client("s3", region_name=settings.aws_region)
+                    logger.info("cspm_scores_fetching_from_s3", bucket=bucket, key=key, region=settings.aws_region)
+                    response = s3.get_object(Bucket=bucket, Key=key)
+                    csv_content = response["Body"].read().decode("utf-8")
+                    logger.debug("cspm_scores_csv_loaded", size_bytes=len(csv_content), bucket=bucket, key=key)
+                    return csv_content
                 
-                logger.debug("cspm_scores_csv_loaded", size_bytes=len(csv_content), bucket=bucket, key=key)
+                # Run S3 fetch in thread to avoid blocking
+                import asyncio
+                csv_content = await asyncio.to_thread(_fetch_s3_csv)
+                
                 df = pd.read_csv(StringIO(csv_content))
                 logger.info("cspm_scores_loaded_from_s3", key=key, rows=len(df), columns=list(df.columns))
 

@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,9 +22,12 @@ async def executive_overview(
 ):
     snapshot = await get_live_snapshot(force=refresh)
     
-    # Fetch CSPM scores from S3 and merge into accounts
+    # Fetch CSPM scores from S3 with timeout and merge into accounts
     try:
-        scores_result = await get_cspm_scores_from_s3()
+        scores_result = await asyncio.wait_for(
+            get_cspm_scores_from_s3(),
+            timeout=15
+        )
         cspm_scores = scores_result.get("scores", {})
         
         # Merge scores into accounts before building executive overview
@@ -34,6 +39,8 @@ async def executive_overview(
                 account["nist_score"] = scores.get("nist_score", 0)
                 # Calculate composite CSPM score (average of CIS and NIST)
                 account["cspm_score"] = (scores.get("cis_score", 0) + scores.get("nist_score", 0)) / 2
+    except asyncio.TimeoutError:
+        logger.warning("executive_overview_cspm_scores_timeout")
     except Exception as e:
         logger.warning("executive_overview_cspm_scores_fetch_failed", error=str(e))
     
@@ -53,6 +60,71 @@ async def cspm_summary(refresh: bool = Query(False)):
     return cspm_analytics.summary_from_findings(snapshot.get("cspm_findings", []), snapshot.get("accounts", []))
 
 
+@router.get("/debug/s3-config")
+async def debug_s3_config():
+    """Debug endpoint - check S3 configuration"""
+    from app.core.config import get_settings
+    settings = get_settings()
+    
+    return {
+        "cspm_scores_s3_url": settings.cspm_scores_s3_url if settings.cspm_scores_s3_url else "NOT SET",
+        "s3_findings_bucket": settings.s3_findings_bucket if settings.s3_findings_bucket else "NOT SET",
+        "aws_region": settings.aws_region,
+    }
+
+
+@router.get("/debug/s3-test")
+async def debug_s3_test():
+    """Debug endpoint - test S3 access with timeout"""
+    import asyncio
+    import boto3
+    from app.core.config import get_settings
+    
+    settings = get_settings()
+    
+    try:
+        # Parse S3 URL
+        direct_url = settings.cspm_scores_s3_url
+        if not direct_url or not direct_url.startswith("s3://"):
+            return {"error": "CSPM_SCORES_S3_URL not configured or invalid", "url": direct_url}
+        
+        parts = direct_url.replace("s3://", "").split("/", 1)
+        bucket = parts[0]
+        key = parts[1] if len(parts) > 1 else ""
+        
+        logger.info("debug_s3_test_start", bucket=bucket, key=key)
+        
+        # Try to fetch with timeout
+        async def _fetch():
+            s3 = boto3.client("s3", region_name=settings.aws_region)
+            logger.info("debug_s3_test_fetching", bucket=bucket, key=key)
+            response = s3.get_object(Bucket=bucket, Key=key)
+            csv_content = response["Body"].read().decode("utf-8")
+            return csv_content
+        
+        # Run with 15 second timeout
+        csv_content = await asyncio.wait_for(
+            asyncio.to_thread(_fetch),
+            timeout=15
+        )
+        
+        logger.info("debug_s3_test_success", size=len(csv_content))
+        return {
+            "success": True,
+            "bucket": bucket,
+            "key": key,
+            "csv_size_bytes": len(csv_content),
+            "first_100_chars": csv_content[:100],
+        }
+        
+    except asyncio.TimeoutError:
+        logger.error("debug_s3_test_timeout")
+        return {"error": "S3 fetch timed out after 15 seconds"}
+    except Exception as e:
+        logger.error("debug_s3_test_error", error=str(e), error_type=type(e).__name__)
+        return {"error": str(e), "error_type": type(e).__name__}
+
+
 @router.get("/cspm/scores")
 async def cspm_scores(month: str | None = Query(None)):
     """
@@ -68,7 +140,26 @@ async def cspm_scores(month: str | None = Query(None)):
         "error": str or null
     }
     """
-    result = await get_cspm_scores_from_s3(month=month)
+    try:
+        # Add 20-second timeout for S3 fetch
+        result = await asyncio.wait_for(
+            get_cspm_scores_from_s3(month=month),
+            timeout=20
+        )
+    except asyncio.TimeoutError:
+        logger.error("cspm_scores_endpoint_timeout")
+        return {
+            "scores": {},
+            "source": "none",
+            "error": "S3 fetch timed out after 20 seconds"
+        }
+    except Exception as e:
+        logger.error("cspm_scores_endpoint_error", error=str(e))
+        return {
+            "scores": {},
+            "source": "none",
+            "error": str(e)
+        }
     
     # If source is "none", return structured error response
     if result.get("source") == "none":
