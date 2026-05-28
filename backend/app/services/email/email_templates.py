@@ -183,9 +183,6 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
     avg_cis = sum(d.get('cis_score', 0) for d in account_scores.values()) / len(account_scores) if account_scores else 0
     avg_nist = sum(d.get('nist_score', 0) for d in account_scores.values()) / len(account_scores) if account_scores else 0
     
-    # Determine score color based on value
-    cspm_color = "#10B981" if cspm_security_score >= 70 else "#F59E0B" if cspm_security_score >= 50 else "#EF4444"
-    
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -209,8 +206,6 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
         .metric-box {{ padding: 12px; background-color: #1E293B; border-radius: 6px; border-left: 4px solid #34D399; }}
         .metric-label {{ color: #94A3B8; font-size: 12px; text-transform: uppercase; }}
         .metric-value {{ color: #34D399; font-size: 24px; font-weight: bold; margin-top: 4px; }}
-        .cspm-score {{ border-left-color: {cspm_color}; }}
-        .cspm-value {{ color: {cspm_color}; }}
     </style>
 </head>
 <body>
@@ -221,39 +216,8 @@ def get_cspm_email_template(account_scores: dict[str, dict], cspm_security_score
         </div>
         
         <div class="section">
-            <h2>Overall Security Posture</h2>
-            <div style="background-color: #1E293B; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
-                <div style="text-align: center; margin-bottom: 16px;">
-                    <svg width="160" height="160" style="margin: 0 auto; display: block;">
-                        <circle cx="80" cy="80" r="70" fill="none" stroke="#334155" stroke-width="8"/>
-                        <circle cx="80" cy="80" r="70" fill="none" stroke="{cspm_color}" stroke-width="8" 
-                                stroke-dasharray="{cspm_security_score * 4.398:.1f} 439.8" stroke-linecap="round" 
-                                style="transform: rotate(-90deg); transform-origin: 80px 80px; transition: stroke-dasharray 0.5s;"/>
-                        <text x="80" y="75" text-anchor="middle" fill="{cspm_color}" font-size="36" font-weight="bold">{cspm_security_score:.0f}</text>
-                        <text x="80" y="95" text-anchor="middle" fill="#94A3B8" font-size="14">/100</text>
-                    </svg>
-                    <div style="color: #94A3B8; font-size: 12px; text-transform: uppercase; margin-top: 8px;">CSPM Security Score</div>
-                </div>
-            </div>
-            <div class="metrics">
-                <div class="metric-box">
-                    <div class="metric-label">Total Accounts</div>
-                    <div class="metric-value">{len(account_scores)}</div>
-                </div>
-                <div class="metric-box">
-                    <div class="metric-label">CIS AWS Foundations Benchmark v5.0.0</div>
-                    <div class="metric-value">{avg_cis:.1f}%</div>
-                </div>
-                <div class="metric-box">
-                    <div class="metric-label">NIST Special Publication 800-53 Revision 5</div>
-                    <div class="metric-value">{avg_nist:.1f}%</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="section">
-            <h2>Consolidated Account Compliance</h2>
-            <p><strong>This report contains consolidated CSPM findings for selected AWS accounts under the same owner.</strong> Review the detailed findings in the attached XLSX report (5 sheets: Executive Summary, All Failed, Critical, High, Medium).</p>
+            <h2>Account Compliance Overview</h2>
+            <p><strong>This report contains CSPM findings for selected AWS accounts.</strong> Review the detailed findings in the attached XLSX report (5 sheets: Executive Summary, All Failed, Critical, High, Medium).</p>
             <div style="background-color: #0F172A; border-radius: 8px; padding: 16px;">
                 {bars_html}
             </div>
